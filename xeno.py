@@ -110,7 +110,7 @@ class Injector:
         """
         self._scan_module_for_providers(module)
 
-    def create(self, clazz):
+    def create(self, clazz, lazy = False):
         """
         Create an instance of the specified class.  The class' constructor
         must follow the rules for @inject methods, such that all of its
@@ -121,15 +121,15 @@ class Injector:
         with these parameters in the constructor, then mark one or more
         methods with @inject and pass the instance to Injector.inject().
         """
-        ctor_params = self._get_injection_params(clazz.__init__, unbound_ctor = True)
+        ctor_params, default_set = self._get_injection_params(clazz.__init__, unbound_ctor = True)
 
         try:
-            kwargs = {name: self.require(name) for name in ctor_params}
+            kwargs = self._get_injection_kwargs(ctor_params, default_set)
         except MethodInjectionError as e:
             raise ClassInjectionError(clazz, e.name)
         
         instance = clazz(**kwargs)
-        self._inject_instance(instance)
+        self._inject_instance(instance, lazy)
         return instance
 
     def inject(self, obj, lazy = False):
@@ -188,9 +188,18 @@ class Injector:
         else:
             self.resources[name] = injected_method
     
+    def _get_injection_kwargs(self, params, default_set):
+        kwargs = {}
+        for param in params:
+            if param in default_set and not self.has(param):
+                continue
+            kwargs[param] = self.require(param)
+        return kwargs
+
     def _get_injection_params(self, method, unbound_ctor = False):
         sig = inspect.signature(method)
         injection_param_names = []
+        default_param_set = set()
         params = list(sig.parameters.values())
 
         if not inspect.ismethod(method) and unbound_ctor:
@@ -200,29 +209,27 @@ class Injector:
 
         for param in params:
             if param.kind in [inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY]:
-                if not self.has(param.name):
-                    if param.default is param.empty:
-                        raise InjectionError('Argument "%s" has no default value and was not provided as a resource.' % param.name)
-                else:
-                    injection_param_names.append(param.name)
+                if param.default != param.empty:
+                    default_param_set.add(param.name)
+                injection_param_names.append(param.name)
             else:
                 raise InjectionError('xeno.Injector only supports injection of POSITIONAL_OR_KEYWORD and KEYWORD_ONLY arguments, %s arguments (%s) are not supported.' % (
                     param.kind, param.name))
-        return injection_param_names
+        return injection_param_names, default_param_set
 
     def _inject_instance(self, instance, lazy):
         return self._scan_instance_for_injection_points(instance, lazy)
     
     def _inject_method(self, method, lazy):
-        params = self._get_injection_params(method)
+        params, default_set = self._get_injection_params(method)
 
         if lazy:
             def wrapper():
-                kwargs = {name: self.require(name, method) for name in params}
+                kwargs = self._get_injection_kwargs(params, default_set)
                 return method(*kwargs)
             return wrapper
         else:
-            kwargs = {name: self.require(name, method) for name in params}
+            kwargs = self._get_injection_kwargs(params, default_set)
             def wrapper():
                 return method(**kwargs)
             return wrapper
