@@ -1,4 +1,4 @@
-.. image:: https://raw.githubusercontent.com/lainproliant/xeno/master/pachimari.png
+.. image:: https://raw.githubusercontent.com/lainproliant/xeno/master/pachimari.jpg
 
 Xeno: The Python dependency injector from outer space.
 ======================================================
