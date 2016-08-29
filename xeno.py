@@ -101,7 +101,7 @@ class Injector:
         self.singletons = {}
         for module in modules:
             self.add_module(module)
-    
+
     def add_module(self, module):
         """
         Add a module to the injector.  The module is scanned for @provider
@@ -110,7 +110,7 @@ class Injector:
         """
         self._scan_module_for_providers(module)
 
-    def create(self, clazz, lazy = False):
+    def create(self, clazz):
         """
         Create an instance of the specified class.  The class' constructor
         must follow the rules for @inject methods, such that all of its
@@ -127,29 +127,25 @@ class Injector:
             kwargs = self._get_injection_kwargs(ctor_params, default_set)
         except MethodInjectionError as e:
             raise ClassInjectionError(clazz, e.name)
-        
+
         instance = clazz(**kwargs)
-        self._inject_instance(instance, lazy)
+        self._inject_instance(instance)
         return instance
 
-    def inject(self, obj, lazy = False):
+    def inject(self, obj):
         """
         Inject a method or object instance with resources from this Injector.
-        
+
         obj: A method or object instance.  If this is a method, all named
              parameters are injected from the Injector.  If this is an instance,
              its methods are scanned for injection points and these methods
              are all invoked with resources from the Injector.
-        lazy (default False): Whether resource mappings should be lazy.  If True,
-             instead of mapping resources immediately, the mapping is performed
-             when the method is invoked.  This allows additional modules to be
-             added later that change the resources used by the method or object.
         """
         if inspect.isfunction(obj) or inspect.ismethod(obj):
-            return self._inject_method(obj, lazy)
+            return self._inject_method(obj)
         else:
-            return self._inject_instance(obj, lazy)
-    
+            return self._inject_instance(obj)
+
     def require(self, name, method = None):
         """
         Require a named resource from this Injector.  If it can't be provided,
@@ -187,7 +183,7 @@ class Injector:
             self.resources[name] = wrapper
         else:
             self.resources[name] = injected_method
-    
+
     def _get_injection_kwargs(self, params, default_set):
         kwargs = {}
         for param in params:
@@ -217,29 +213,23 @@ class Injector:
                     param.kind, param.name))
         return injection_param_names, default_param_set
 
-    def _inject_instance(self, instance, lazy):
-        return self._scan_instance_for_injection_points(instance, lazy)
-    
-    def _inject_method(self, method, lazy):
+    def _inject_instance(self, instance):
+        return self._scan_instance_for_injection_points(instance)
+
+    def _inject_method(self, method):
         params, default_set = self._get_injection_params(method)
 
-        if lazy:
-            def wrapper():
-                kwargs = self._get_injection_kwargs(params, default_set)
-                return method(*kwargs)
-            return wrapper
-        else:
+        def wrapper():
             kwargs = self._get_injection_kwargs(params, default_set)
-            def wrapper():
-                return method(**kwargs)
-            return wrapper
+            return method(**kwargs)
+        return wrapper
 
-    def _scan_instance_for_injection_points(self, instance, lazy):
+    def _scan_instance_for_injection_points(self, instance):
         members = inspect.getmembers(instance,
                                      predicate=inspect.ismethod)
         for name, bound_method in members:
             if hasattr(bound_method, '_xeno_injection_point'):
-                self.inject(bound_method, lazy)()
+                self.inject(bound_method)()
         return instance
 
     def _scan_module_for_providers(self, module):

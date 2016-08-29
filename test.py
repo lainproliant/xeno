@@ -9,7 +9,7 @@ class XenoTests(unittest.TestCase):
             @provide
             def name(self):
                 return 'Lain'
-        
+
         class NamePrinter:
             def __init__(self, name):
                 self.name = name
@@ -61,7 +61,7 @@ class XenoTests(unittest.TestCase):
             @inject
             def set_name(self, name):
                 self.name = name
-    
+
         printer = NamePrinter()
         injector = Injector(Module())
         injector.inject(printer)
@@ -93,17 +93,26 @@ class XenoTests(unittest.TestCase):
             @provide
             def name(self):
                 return 'Lain'
-            
+
             @provide
             def last_name(self):
                 return 'Supe'
 
             @provide
-            def full_name(self, *, name, last_name):
+            def full_name(self, *arg, name, last_name):
                 return name + last_name
+
+        class NamePrinter:
+            def __init__(self, full_name):
+                self.full_name = full_name
+
+            def print_name(self):
+                print("My full name is %s" % self.full_name)
 
         with self.assertRaises(InjectionError):
             injector = Injector(Module())
+            printer = injector.create(NamePrinter)
+            printer.print_name()
 
     def test_ctor_injection_with_defaults_not_provided(self):
         """Test to verify that a constructor with defaults that
@@ -119,7 +128,7 @@ class XenoTests(unittest.TestCase):
             def __init__(self, name, last_name = 'Supe'):
                 self.name = name
                 self.last_name = last_name
-        
+
         injector = Injector(Module())
         printer = injector.create(NamePrinter)
         self.assertEqual(printer.name, 'Lain')
@@ -144,7 +153,7 @@ class XenoTests(unittest.TestCase):
             def __init__(self, name, last_name = 'Supe'):
                 self.name = name
                 self.last_name = last_name
-        
+
         injector = Injector(Module())
         printer = injector.create(NamePrinter)
         self.assertEqual(printer.name, 'Lain')
