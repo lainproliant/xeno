@@ -97,7 +97,7 @@ class Injector:
                   More modules can be added later by calling
                   Injector.add_module().
         """
-        self.resources = {}
+        self.resources = {'injector': lambda: self}
         self.singletons = {}
         for module in modules:
             self.add_module(module)

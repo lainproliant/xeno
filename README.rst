@@ -79,3 +79,11 @@ In this simple example, we inject an output stream into an object.
     writer.write_version()
 
 Checkout ``test.py`` in the git repo for more usage examples.
+
+Change Log
+----------
+
+Version 1.3: August 29th, 2016
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- Have the injector offer itself as a named resource named 'injector'.
+
