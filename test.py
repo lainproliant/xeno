@@ -159,6 +159,23 @@ class XenoTests(unittest.TestCase):
         self.assertEqual(printer.name, 'Lain')
         self.assertEqual(printer.last_name, 'Musgrove')
 
+    def test_cycle_check(self):
+        class Module:
+            @provide
+            def a(self, b):
+                return 1
+
+            @provide
+            def b(self, c):
+                return 1
+
+            @provide
+            def c(self, a):
+                return 1
+
+        with self.assertRaises(CircularDependencyError):
+            injector = Injector(Module())
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()

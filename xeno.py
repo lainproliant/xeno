@@ -6,6 +6,7 @@
 #
 # Released under a 3-clause BSD license, see LICENSE for more info.
 #--------------------------------------------------------------------
+import collections
 import inspect
 
 #--------------------------------------------------------------------
@@ -29,6 +30,14 @@ class ClassInjectionError(InjectionError):
             clazz.__qualname__) + reason or "")
         self.clazz = clazz
         self.name = name
+
+#--------------------------------------------------------------------
+class CircularDependencyError(InjectionError):
+    def __init__(self, resource, dep):
+        super().__init__('Circular dependency detected between "%s" and "%s".' % (
+            resource, dep))
+        self.resource = resource
+        self.dep = dep
 
 #--------------------------------------------------------------------
 def singleton(f):
@@ -99,16 +108,21 @@ class Injector:
         """
         self.resources = {'injector': lambda: self}
         self.singletons = {}
+        self.dep_graph = {}
+        
         for module in modules:
-            self.add_module(module)
+            self.add_module(module, skip_cycle_check = True)
+        self._check_for_cycles()
 
-    def add_module(self, module):
+    def add_module(self, module, skip_cycle_check = False):
         """
         Add a module to the injector.  The module is scanned for @provider
         annotated methods, and these methods are added as resources to
         the injector.
         """
         self._scan_module_for_providers(module)
+        if not skip_cycle_check:
+            self._check_for_cycles()
 
     def create(self, clazz):
         """
@@ -144,7 +158,7 @@ class Injector:
         if inspect.isfunction(obj) or inspect.ismethod(obj):
             return self._inject_method(obj)
         else:
-            return self._inject_instance(obj)
+            return self._inject_instance(obj), []
 
     def require(self, name, method = None):
         """
@@ -171,7 +185,7 @@ class Injector:
         return name in self.resources
 
     def _bind_resource(self, name, bound_method):
-        injected_method = self.inject(bound_method)
+        injected_method, deps  = self.inject(bound_method)
         if hasattr(bound_method, '_xeno_singleton'):
             def wrapper():
                 if not name in self.singletons:
@@ -180,9 +194,25 @@ class Injector:
                     return singleton
                 else:
                     return self.singletons[name]
-            self.resources[name] = wrapper
+            resource = wrapper
         else:
-            self.resources[name] = injected_method
+            resource = injected_method
+
+        self.resources[name] = resource
+        self.dep_graph[name] = deps
+
+    def _check_for_cycles(self):
+        visited = set()
+
+        def visit(resource):
+            visited.add(resource)
+            for dep in self.dep_graph.get(resource, ()):
+                if dep in visited or visit(dep):
+                    raise CircularDependencyError(resource, dep)
+            visited.remove(resource)
+        
+        for resource in self.dep_graph.keys():
+            visit(resource)
 
     def _get_injection_kwargs(self, params, default_set):
         kwargs = {}
@@ -222,14 +252,14 @@ class Injector:
         def wrapper():
             kwargs = self._get_injection_kwargs(params, default_set)
             return method(**kwargs)
-        return wrapper
+        return wrapper, params
 
     def _scan_instance_for_injection_points(self, instance):
         members = inspect.getmembers(instance,
                                      predicate=inspect.ismethod)
         for name, bound_method in members:
             if hasattr(bound_method, '_xeno_injection_point'):
-                self.inject(bound_method)()
+                self.inject(bound_method)[0]()
         return instance
 
     def _scan_module_for_providers(self, module):

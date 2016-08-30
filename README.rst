@@ -83,6 +83,10 @@ Checkout ``test.py`` in the git repo for more usage examples.
 Change Log
 ----------
 
+Version 1.4: August 30th, 2016
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- Added cycle detection.
+
 Version 1.3: August 29th, 2016
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 - Have the injector offer itself as a named resource named 'injector'.
