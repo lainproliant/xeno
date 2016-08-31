@@ -229,9 +229,16 @@ class Injector:
         params = list(sig.parameters.values())
 
         if not inspect.ismethod(method) and unbound_ctor:
-            # Don't try to inject the 'self' parameter of an
-            # unbound constructor.
-            params = params[1:]
+            if not inspect.isfunction(method):
+                # We do not want to try to inject a slot wrapper
+                # version of __init__, as its params are (*args, **kwargs)
+                # and it does nothing anyway.
+                return [], set()
+
+            else:
+                # Don't try to inject the 'self' parameter of an
+                # unbound constructor.
+                params = params[1:]
 
         for param in params:
             if param.kind in [inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY]:

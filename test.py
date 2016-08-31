@@ -176,6 +176,14 @@ class XenoTests(unittest.TestCase):
         with self.assertRaises(CircularDependencyError):
             injector = Injector(Module())
 
+    def test_create_no_ctor(self):
+        class ClassNoCtor:
+            def f(self):
+                pass
+
+        injector = Injector()
+        c = injector.create(ClassNoCtor)
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()
