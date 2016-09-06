@@ -196,12 +196,12 @@ class XenoTests(unittest.TestCase):
 
         class Parent:
             @inject
-            def inject_a(self, a):
+            def inject(self, a):
                 self.a = a
 
         class Child(Parent):
             @inject
-            def inject_b(self, b):
+            def inject(self, b):
                 self.b = b
 
         injector = Injector(Module())

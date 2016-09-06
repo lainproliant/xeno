@@ -93,25 +93,22 @@ def get_injection_points(obj):
     and return them as a stream of tuples.
     """
     
-    func_map = collections.OrderedDict()
     for clazz in inspect.getmro(obj.__class__):
         for name, method in inspect.getmembers(clazz, predicate = inspect.isfunction):
             if hasattr(method, '_xeno_injection_point'):
-                func_map[name] = bind_unbound_method(obj, method)
-    return func_map.items()
+                yield (name, bind_unbound_method(obj, method))
 
 #--------------------------------------------------------------------
 def get_providers(obj):
     """
     Scan the object and all of its parents for providers and return them
-    as a list.
+    as a stream of tuples.
     """
-    func_map = collections.OrderedDict()
+
     for clazz in inspect.getmro(obj.__class__):
         for name, method in inspect.getmembers(clazz, predicate = inspect.isfunction):
             if hasattr(method, '_xeno_provider'):
-                func_map[name] = bind_unbound_method(obj, method)
-    return func_map.items()
+                yield (name, bind_unbound_method(obj, method))
 
 #--------------------------------------------------------------------
 class Injector:
