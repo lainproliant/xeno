@@ -101,14 +101,14 @@ class XenoTests(unittest.TestCase):
             @provide
             def full_name(self, *arg, name, last_name):
                 return name + last_name
-
+    
         class NamePrinter:
             def __init__(self, full_name):
                 self.full_name = full_name
 
             def print_name(self):
                 print("My full name is %s" % self.full_name)
-
+        
         with self.assertRaises(InjectionError):
             injector = Injector(Module())
             printer = injector.create(NamePrinter)
@@ -183,6 +183,54 @@ class XenoTests(unittest.TestCase):
 
         injector = Injector()
         c = injector.create(ClassNoCtor)
+
+    def test_inject_from_subclass(self):
+        class Module:
+            @provide
+            def a(self):
+                return 1
+
+            @provide
+            def b(self):
+                return 2
+
+        class Parent:
+            @inject
+            def inject_a(self, a):
+                self.a = a
+
+        class Child(Parent):
+            @inject
+            def inject_b(self, b):
+                self.b = b
+
+        injector = Injector(Module())
+        child = injector.create(Child)
+
+        self.assertEqual(child.a, 1)
+        self.assertEqual(child.b, 2)
+
+    def test_provide_from_subclass(self):
+        class SubModule:
+            @provide
+            def first_name(self):
+                return "Lain"
+
+        class Module(SubModule):
+            @provide
+            def last_name(self):
+                return "Supe"
+
+        class NamePrinter:
+            def __init__(self, first_name, last_name):
+                self.first_name = first_name
+                self.last_name = last_name
+
+        injector = Injector(Module())
+        printer = injector.create(NamePrinter)
+
+        self.assertEqual(printer.first_name, 'Lain')
+        self.assertEqual(printer.last_name, 'Supe')
 
 #--------------------------------------------------------------------
 if __name__ == '__main__':

@@ -83,6 +83,37 @@ def inject(f):
     return f
 
 #--------------------------------------------------------------------
+def bind_unbound_method(obj, method):
+    return method.__get__(obj, obj.__class__)
+
+#--------------------------------------------------------------------
+def get_injection_points(obj):
+    """
+    Scan the object and all of its parents for injection points
+    and return them as a stream of tuples.
+    """
+    
+    func_map = collections.OrderedDict()
+    for clazz in inspect.getmro(obj.__class__):
+        for name, method in inspect.getmembers(clazz, predicate = inspect.isfunction):
+            if hasattr(method, '_xeno_injection_point'):
+                func_map[name] = bind_unbound_method(obj, method)
+    return func_map.items()
+
+#--------------------------------------------------------------------
+def get_providers(obj):
+    """
+    Scan the object and all of its parents for providers and return them
+    as a list.
+    """
+    func_map = collections.OrderedDict()
+    for clazz in inspect.getmro(obj.__class__):
+        for name, method in inspect.getmembers(clazz, predicate = inspect.isfunction):
+            if hasattr(method, '_xeno_provider'):
+                func_map[name] = bind_unbound_method(obj, method)
+    return func_map.items()
+
+#--------------------------------------------------------------------
 class Injector:
     """
     An object responsible for collecting resources from modules and
@@ -262,17 +293,11 @@ class Injector:
         return wrapper, params
 
     def _scan_instance_for_injection_points(self, instance):
-        members = inspect.getmembers(instance,
-                                     predicate=inspect.ismethod)
-        for name, bound_method in members:
-            if hasattr(bound_method, '_xeno_injection_point'):
-                self.inject(bound_method)[0]()
+        for name, injection_point in get_injection_points(instance):
+            self.inject(injection_point)[0]()
         return instance
 
     def _scan_module_for_providers(self, module):
-        members = inspect.getmembers(module,
-                                     predicate=inspect.ismethod)
-        for name, bound_method in members:
-            if hasattr(bound_method, '_xeno_provider'):
-                self._bind_resource(name, bound_method)
+        for name, provider in get_providers(module):
+            self._bind_resource(name, provider)
 
