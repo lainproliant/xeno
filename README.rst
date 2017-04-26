@@ -83,6 +83,13 @@ Checkout ``test.py`` in the git repo for more usage examples.
 Change Log
 ----------
 
+Version 1.5: April 26th, 2017
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- Added injection interceptors
+- Refactored method tagging to use xeno.MethodAttributes instead of named
+  object attributes to make attribute tagging more flexible and usable by
+  the outside world, e.g. for the new injectors.
+
 Version 1.4: August 30th, 2016
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 - Added cycle detection.
