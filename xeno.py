@@ -40,6 +40,29 @@ class CircularDependencyError(InjectionError):
         self.dep = dep
 
 #--------------------------------------------------------------------
+class MethodAttributes:
+    @staticmethod
+    def for_method(f, create = True, write = False, ctor = False):
+        try:
+            return f._xeno_method_attrs
+        except AttributeError:
+            if create:
+                attrs = MethodAttributes(f, ctor = ctor)
+                if write:
+                    f._xeno_method_attrs = attrs
+                return attrs
+            else:
+                return None
+
+    def __init__(self, f, ctor):
+        self.name = f.__name__
+        self.qualname = f.__qualname__
+        self.ctor = False
+        self.singleton = False
+        self.injection_point = False
+        self.provider = False
+
+#--------------------------------------------------------------------
 def singleton(f):
     """
     Method annotation indicating a named singleton resource.
@@ -49,8 +72,9 @@ def singleton(f):
     injected objects that require it.
     """
 
-    f._xeno_singleton = True
-    f._xeno_provider = True
+    attrs = MethodAttributes.for_method(f, write = True)
+    attrs.singleton = True
+    attrs.provider = True
     return f
 
 #--------------------------------------------------------------------
@@ -63,7 +87,8 @@ def provide(f):
     the resource.
     """
 
-    f._xeno_provider = True
+    attrs = MethodAttributes.for_method(f, write = True)
+    attrs.provider = True
     return f
 
 #--------------------------------------------------------------------
@@ -79,7 +104,8 @@ def inject(f):
     to named resources in the Injector, or must provide default values
     which can be overridden by resources in the injector.
     """
-    f._xeno_injection_point = True
+    attrs = MethodAttributes.for_method(f, write = True)
+    attrs.injection_point = True
     return f
 
 #--------------------------------------------------------------------
@@ -87,28 +113,75 @@ def bind_unbound_method(obj, method):
     return method.__get__(obj, obj.__class__)
 
 #--------------------------------------------------------------------
+def scan_methods(obj, filter_f):
+    """
+    Scan the object for methods that match the given attribute filter
+    and return them as a stream of tuples.
+    """
+    for clazz in inspect.getmro(obj.__class__):
+        for name, method in inspect.getmembers(clazz, predicate = inspect.isfunction):
+            attrs = MethodAttributes.for_method(method, create = False)
+            if attrs is not None and filter_f(attrs):
+                yield (attrs, bind_unbound_method(obj, method))
+
+#--------------------------------------------------------------------
 def get_injection_points(obj):
     """
     Scan the object and all of its parents for injection points
     and return them as a stream of tuples.
     """
-    
-    for clazz in inspect.getmro(obj.__class__):
-        for name, method in inspect.getmembers(clazz, predicate = inspect.isfunction):
-            if hasattr(method, '_xeno_injection_point'):
-                yield (name, bind_unbound_method(obj, method))
+
+    return scan_methods(obj, lambda attr: attr.injection_point)
 
 #--------------------------------------------------------------------
 def get_providers(obj):
     """
-    Scan the object and all of its parents for providers and return them
-    as a stream of tuples.
+    Scan the object and all of its parents for providers and return
+    them as a stream of tuples.
     """
 
-    for clazz in inspect.getmro(obj.__class__):
-        for name, method in inspect.getmembers(clazz, predicate = inspect.isfunction):
-            if hasattr(method, '_xeno_provider'):
-                yield (name, bind_unbound_method(obj, method))
+    return scan_methods(obj, lambda attr: attr.provider)
+
+#--------------------------------------------------------------------
+def get_injection_params(f, unbound_ctor = False):
+    """
+    Fetches the injectable parameter names of parameters to the given
+    method, along with a set of parameters which have default values
+    and should be considered optional dependencies.
+
+    This method will throw InjectionError if the method provided has
+    arguments that are not POSITIONAL_OR_KEYWORD or KEYWORD_ONLY.
+
+    If the method provided is an unbound object constructor,
+    unbound_ctor must be set to True to prevent 'self' from being
+    returned by this method as an injectable parameter.
+    """
+    sig = inspect.signature(f)
+    injection_param_names = []
+    default_param_set = set()
+    params = list(sig.parameters.values())
+
+    if not inspect.ismethod(f) and unbound_ctor:
+        if not inspect.isfunction(f):
+            # We do not want to try to inject a slot wrapper
+            # version of __init__, as its params are (*args, **kwargs)
+            # and it does nothing anyway.
+            return [], set()
+
+        else:
+            # Don't try to inject the 'self' parameter of an
+            # unbound constructor.
+            params = params[1:]
+
+    for param in params:
+        if param.kind in [inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY]:
+            if param.default != param.empty:
+                default_param_set.add(param.name)
+            injection_param_names.append(param.name)
+        else:
+            raise InjectionError('xeno only supports injection of POSITIONAL_OR_KEYWORD and KEYWORD_ONLY arguments, %s arguments (%s) are not supported.' % (
+                param.kind, param.name))
+    return injection_param_names, default_param_set
 
 #--------------------------------------------------------------------
 class Injector:
@@ -137,7 +210,8 @@ class Injector:
         self.resources = {'injector': lambda: self}
         self.singletons = {}
         self.dep_graph = {}
-        
+        self.injection_interceptors = []
+
         for module in modules:
             self.add_module(module, skip_cycle_check = True)
         self._check_for_cycles()
@@ -148,9 +222,25 @@ class Injector:
         annotated methods, and these methods are added as resources to
         the injector.
         """
-        self._scan_module_for_providers(module)
+        for attrs, provider in get_providers(module):
+            self._bind_resource(attrs.name, provider)
+
         if not skip_cycle_check:
             self._check_for_cycles()
+
+    def add_injection_interceptor(self, interceptor):
+        """
+        Specifies a function to be called before resources are injected into
+        a provider, constructor, or injection point.  Resources are provided
+        to the function as a key/value map.
+
+        The injection interceptor is expected to return a key/value map
+        containing all of the resources provided to it, either modified
+        or in their original form.  Failure to provide all required
+        resources will lead to an InjectionError after the interceptors
+        are invoked.
+        """
+        self.injection_interceptors.append(interceptor)
 
     def create(self, clazz):
         """
@@ -163,14 +253,14 @@ class Injector:
         with these parameters in the constructor, then mark one or more
         methods with @inject and pass the instance to Injector.inject().
         """
-        ctor_params, default_set = self._get_injection_params(clazz.__init__, unbound_ctor = True)
-
         try:
-            kwargs = self._get_injection_kwargs(ctor_params, default_set)
+            dependency_map = self._resolve_dependencies(clazz.__init__, unbound_ctor = True)
+            attrs = MethodAttributes.for_method(clazz.__init__, ctor = True)
+            dependency_map = self._invoke_injection_interceptors(attrs, dependency_map)
         except MethodInjectionError as e:
             raise ClassInjectionError(clazz, e.name)
 
-        instance = clazz(**kwargs)
+        instance = clazz(**dependency_map)
         self._inject_instance(instance)
         return instance
 
@@ -186,7 +276,7 @@ class Injector:
         if inspect.isfunction(obj) or inspect.ismethod(obj):
             return self._inject_method(obj)
         else:
-            return self._inject_instance(obj), []
+            return self._inject_instance(obj)
 
     def require(self, name, method = None):
         """
@@ -213,8 +303,10 @@ class Injector:
         return name in self.resources
 
     def _bind_resource(self, name, bound_method):
-        injected_method, deps  = self.inject(bound_method)
-        if hasattr(bound_method, '_xeno_singleton'):
+        params, _ = get_injection_params(bound_method)
+        attrs = MethodAttributes.for_method(bound_method)
+        injected_method = self.inject(bound_method)
+        if attrs.singleton:
             def wrapper():
                 if not name in self.singletons:
                     singleton = injected_method()
@@ -227,7 +319,7 @@ class Injector:
             resource = injected_method
 
         self.resources[name] = resource
-        self.dep_graph[name] = deps
+        self.dep_graph[name] = params
 
     def _check_for_cycles(self):
         visited = set()
@@ -238,63 +330,34 @@ class Injector:
                 if dep in visited or visit(dep):
                     raise CircularDependencyError(resource, dep)
             visited.remove(resource)
-        
+
         for resource in self.dep_graph.keys():
             visit(resource)
 
-    def _get_injection_kwargs(self, params, default_set):
-        kwargs = {}
+    def _resolve_dependencies(self, f, unbound_ctor = False):
+        params, default_set = get_injection_params(f, unbound_ctor = unbound_ctor)
+        dependency_map = {}
         for param in params:
             if param in default_set and not self.has(param):
                 continue
-            kwargs[param] = self.require(param)
-        return kwargs
-
-    def _get_injection_params(self, method, unbound_ctor = False):
-        sig = inspect.signature(method)
-        injection_param_names = []
-        default_param_set = set()
-        params = list(sig.parameters.values())
-
-        if not inspect.ismethod(method) and unbound_ctor:
-            if not inspect.isfunction(method):
-                # We do not want to try to inject a slot wrapper
-                # version of __init__, as its params are (*args, **kwargs)
-                # and it does nothing anyway.
-                return [], set()
-
-            else:
-                # Don't try to inject the 'self' parameter of an
-                # unbound constructor.
-                params = params[1:]
-
-        for param in params:
-            if param.kind in [inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY]:
-                if param.default != param.empty:
-                    default_param_set.add(param.name)
-                injection_param_names.append(param.name)
-            else:
-                raise InjectionError('xeno.Injector only supports injection of POSITIONAL_OR_KEYWORD and KEYWORD_ONLY arguments, %s arguments (%s) are not supported.' % (
-                    param.kind, param.name))
-        return injection_param_names, default_param_set
+            dependency_map[param] = self.require(param)
+        return dependency_map
 
     def _inject_instance(self, instance):
-        return self._scan_instance_for_injection_points(instance)
-
-    def _inject_method(self, method):
-        params, default_set = self._get_injection_params(method)
-
-        def wrapper():
-            kwargs = self._get_injection_kwargs(params, default_set)
-            return method(**kwargs)
-        return wrapper, params
-
-    def _scan_instance_for_injection_points(self, instance):
-        for name, injection_point in get_injection_points(instance):
-            self.inject(injection_point)[0]()
+        for attrs, injection_point in get_injection_points(instance):
+            self.inject(injection_point)()
         return instance
 
-    def _scan_module_for_providers(self, module):
-        for name, provider in get_providers(module):
-            self._bind_resource(name, provider)
+    def _inject_method(self, method):
+        def wrapper():
+            dependency_map = self._resolve_dependencies(method)
+            attrs = MethodAttributes.for_method(method)
+            depencency_map = self._invoke_injection_interceptors(attrs, dependency_map)
+            return method(**dependency_map)
+        return wrapper
+
+    def _invoke_injection_interceptors(self, attrs, dependency_map):
+        for interceptor in self.injection_interceptors:
+            dependency_map = interceptor(attrs, dependency_map)
+        return dependency_map
 

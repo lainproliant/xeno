@@ -101,14 +101,14 @@ class XenoTests(unittest.TestCase):
             @provide
             def full_name(self, *arg, name, last_name):
                 return name + last_name
-    
+
         class NamePrinter:
             def __init__(self, full_name):
                 self.full_name = full_name
 
             def print_name(self):
                 print("My full name is %s" % self.full_name)
-        
+
         with self.assertRaises(InjectionError):
             injector = Injector(Module())
             printer = injector.create(NamePrinter)
@@ -231,6 +231,41 @@ class XenoTests(unittest.TestCase):
 
         self.assertEqual(printer.first_name, 'Lain')
         self.assertEqual(printer.last_name, 'Supe')
+
+    def test_injection_interceptor_for_provider(self):
+        test = self
+        class Module:
+            @provide
+            def phone_number(self):
+                return 2060000000
+
+            @provide
+            def address_card(self, phone_number):
+                test.assertTrue(isinstance(phone_number, str))
+                return "Lain Supe: %s" % phone_number
+
+        def intercept_phone_number(attrs, dependency_map):
+            if 'phone_number' in dependency_map:
+                dependency_map['phone_number'] = str(dependency_map['phone_number'])
+            return dependency_map
+
+        def intercept_address_card(attrs, dependency_map):
+            if 'address_card' in dependency_map:
+                dependency_map['address_card'] += '\n2000 Street Blvd, Seattle WA 98125'
+            return dependency_map
+
+        class AddressPrinter:
+            def __init__(self, address_card):
+                self.address_card = address_card
+
+            def print_address(self):
+                test.assertEqual(self.address_card, "Lain Supe: 2060000000\n2000 Street Blvd, Seattle WA 98125")
+
+        injector = Injector(Module())
+        injector.add_injection_interceptor(intercept_phone_number)
+        injector.add_injection_interceptor(intercept_address_card)
+        printer = injector.create(AddressPrinter)
+        printer.print_address()
 
 #--------------------------------------------------------------------
 if __name__ == '__main__':
