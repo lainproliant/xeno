@@ -83,6 +83,11 @@ Checkout ``test.py`` in the git repo for more usage examples.
 Change Log
 ----------
 
+Version 1.6: April 26th, 2017
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- Changed how xeno.MethodAttributes works: it now holds a map of attributes
+  and provides methods get(), put(), and check()
+
 Version 1.5: April 26th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 - Added injection interceptors

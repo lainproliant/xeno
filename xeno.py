@@ -54,13 +54,25 @@ class MethodAttributes:
             else:
                 return None
 
+    def put(self, attr, value = True):
+        self.attr_map[attr] = value
+        return self
+
+    def get(self, attr, default_value = None, throw_if_missing = True):
+        if attr in self.attr_map:
+            return self.attr_map[attr]
+        elif throw_if_missing and default_value is None:
+            raise AttributeError('No such method attribute: %s' % attr)
+        else:
+            return default_value
+
+    def check(self, attr):
+        return True if self.get(attr, throw_if_missing = False) else False
+
     def __init__(self, f, ctor):
-        self.name = f.__name__
-        self.qualname = f.__qualname__
-        self.ctor = False
-        self.singleton = False
-        self.injection_point = False
-        self.provider = False
+        self.attr_map = {}
+        self.put('name', f.__name__)
+        self.put('qualname', f.__qualname__)
 
 #--------------------------------------------------------------------
 def singleton(f):
@@ -73,8 +85,8 @@ def singleton(f):
     """
 
     attrs = MethodAttributes.for_method(f, write = True)
-    attrs.singleton = True
-    attrs.provider = True
+    attrs.put('singleton')
+    attrs.put('provider')
     return f
 
 #--------------------------------------------------------------------
@@ -88,7 +100,7 @@ def provide(f):
     """
 
     attrs = MethodAttributes.for_method(f, write = True)
-    attrs.provider = True
+    attrs.put('provider')
     return f
 
 #--------------------------------------------------------------------
@@ -105,7 +117,7 @@ def inject(f):
     which can be overridden by resources in the injector.
     """
     attrs = MethodAttributes.for_method(f, write = True)
-    attrs.injection_point = True
+    attrs.put('injection_point')
     return f
 
 #--------------------------------------------------------------------
@@ -131,7 +143,7 @@ def get_injection_points(obj):
     and return them as a stream of tuples.
     """
 
-    return scan_methods(obj, lambda attr: attr.injection_point)
+    return scan_methods(obj, lambda attr: attr.check('injection_point'))
 
 #--------------------------------------------------------------------
 def get_providers(obj):
@@ -140,7 +152,7 @@ def get_providers(obj):
     them as a stream of tuples.
     """
 
-    return scan_methods(obj, lambda attr: attr.provider)
+    return scan_methods(obj, lambda attr: attr.check('provider'))
 
 #--------------------------------------------------------------------
 def get_injection_params(f, unbound_ctor = False):
@@ -223,7 +235,7 @@ class Injector:
         the injector.
         """
         for attrs, provider in get_providers(module):
-            self._bind_resource(attrs.name, provider)
+            self._bind_resource(attrs.get('name'), provider)
 
         if not skip_cycle_check:
             self._check_for_cycles()
@@ -306,7 +318,7 @@ class Injector:
         params, _ = get_injection_params(bound_method)
         attrs = MethodAttributes.for_method(bound_method)
         injected_method = self.inject(bound_method)
-        if attrs.singleton:
+        if attrs.check('singleton'):
             def wrapper():
                 if not name in self.singletons:
                     singleton = injected_method()
