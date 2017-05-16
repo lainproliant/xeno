@@ -267,6 +267,80 @@ class XenoTests(unittest.TestCase):
         printer = injector.create(AddressPrinter)
         printer.print_address()
 
+    def test_namespaces_and_annotated_resource_params(self):
+        @namespace('A')
+        class ModuleA:
+            @provide
+            @named('first-name')
+            def first(self):
+                return 'Lain'
+
+        @namespace('B')
+        class ModuleB:
+            @provide
+            @named('last-name')
+            def last(self):
+                return 'Supe'
+
+        @namespace('C')
+        @using('A')
+        class ModuleC:
+            @provide
+            def name(self, first: 'first-name', last: 'B::last-name'):
+                return '%s %s' % (first, last)
+
+        class NameContainer:
+            @inject
+            def __init__(self, name: 'C::name'):
+                self.name = name
+
+            def get(self):
+                return self.name
+
+        injector = Injector(ModuleA(), ModuleB(), ModuleC())
+        name = injector.create(NameContainer).get()
+        self.assertEqual(name, 'Lain Supe')
+
+    def test_basic_alias(self):
+        class ModuleA:
+            @provide
+            def really_long_name_for_a_resource_eh(self):
+                return 'Lain Supe'
+
+            @provide
+            @alias('name', 'really_long_name_for_a_resource_eh')
+            def person_name(self, name):
+                return name
+
+        @alias('birth_name', 'person_name')
+        class ModuleB:
+            @provide
+            def special_name(self, birth_name):
+                return 'Her Majesty Princess ' + birth_name
+
+        injector = Injector(ModuleA(), ModuleB())
+        name = injector.require('person_name')
+        self.assertEqual(name, 'Lain Supe')
+        special_name = injector.require('special_name')
+        self.assertTrue(special_name, 'Her Majesty Princess Lain Supe')
+
+    def test_bad_alias_loop(self):
+        class ModuleA:
+            @provide
+            def name(self):
+                return 'Lain Supe'
+
+            @provide
+            @alias('full_name', 'name')
+            @alias('name', 'full_name')
+            def person_name(self, full_name):
+                return full_name
+
+        injector = Injector(ModuleA())
+        with self.assertRaises(InjectionError) as context:
+            injector.require('person_name')
+        self.assertTrue(str(context.exception).startswith('Alias loop detected'))
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()
