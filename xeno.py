@@ -10,6 +10,9 @@ import collections
 import inspect
 
 #--------------------------------------------------------------------
+NOTHING = object()
+
+#--------------------------------------------------------------------
 class InjectionError(Exception):
     pass
 
@@ -40,16 +43,20 @@ class CircularDependencyError(InjectionError):
         self.dep = dep
 
 #--------------------------------------------------------------------
-class MethodAttributes:
+class Attributes:
+    def __init__(self):
+        self.attr_map = {}
+
     @staticmethod
-    def for_method(f, create = True, write = False, ctor = False):
+    def for_object(obj, create = True, write = False, factory = lambda: Attributes()):
         try:
-            return f._xeno_method_attrs
+            return obj._attrs
+
         except AttributeError:
             if create:
-                attrs = MethodAttributes(f, ctor = ctor)
+                attrs = factory(obj)
                 if write:
-                    f._xeno_method_attrs = attrs
+                    obj._attrs = attrs
                 return attrs
             else:
                 return None
@@ -58,21 +65,93 @@ class MethodAttributes:
         self.attr_map[attr] = value
         return self
 
-    def get(self, attr, default_value = None, throw_if_missing = True):
+    def get(self, attr, default_value = NOTHING):
         if attr in self.attr_map:
             return self.attr_map[attr]
-        elif throw_if_missing and default_value is None:
-            raise AttributeError('No such method attribute: %s' % attr)
+        elif default_value is NOTHING:
+            raise AttributeError('No such attribute: %s' % attr)
         else:
             return default_value
 
     def check(self, attr):
-        return True if self.get(attr, throw_if_missing = False) else False
+        return True if self.get(attr, None) else False
 
-    def __init__(self, f, ctor):
-        self.attr_map = {}
+#--------------------------------------------------------------------
+class ClassAttributes(Attributes):
+    @staticmethod
+    def for_class(clazz, create = True, write = False):
+        return Attributes.for_object(clazz, create, write, factory = lambda x: ClassAttributes(x))
+
+    def __init__(self, clazz):
+        super().__init__()
+        self.put('name', clazz.__name__)
+        self.put('qualname', clazz.__qualname__)
+
+#--------------------------------------------------------------------
+class MethodAttributes(Attributes):
+    @staticmethod
+    def for_method(f, create = True, write = False):
+        return Attributes.for_object(f, create, write, factory = lambda x: MethodAttributes(x))
+
+    def __init__(self, f):
+        super().__init__()
         self.put('name', f.__name__)
         self.put('qualname', f.__qualname__)
+        self.put('annotations', getattr(f, '__annotations__', {}))
+
+    def get_annotation(self, name):
+        return self.get('annotations').get(name, None)
+
+#--------------------------------------------------------------------
+class Namespace:
+    ROOT = '@root'
+
+    @staticmethod
+    def root(sep = '::'):
+        return Namespace(Namespace.ROOT, sep = sep)
+
+    @staticmethod
+    def leaf_name(name, sep = '::'):
+        return name.split(sep)[-1]
+
+    def __init__(self, name, sep = '::'):
+        self.name = name
+        self.sub_namespaces = {}
+        self.leaves = set()
+        self.sep = sep
+
+    def add(self, name):
+        if not name:
+            raise ValueError('Leaf node name is empty!')
+        parts = name.split(self.sep)
+        if len(parts) == 1:
+            if name in self.sub_namespaces:
+                raise ValueError('Leaf node cannot have the same name as an existing namespace: "%s"' % name)
+            self.leaves.add(name)
+        else:
+            if not parts[0] in self.sub_namespaces:
+                if parts[0] in self.leaves:
+                    raise ValueError('Namespace cannot have the same name as an existing leaf node: "%s"' % parts[0])
+                self.sub_namespaces[parts[0]] = Namespace(parts[0])
+            namespace = self.sub_namespaces[parts[0]]
+            namespace.add(self.sep.join(parts[1:]))
+
+    def enumerate(self, name = None):
+        if name is None:
+            names = set() | {"%s::%s" % (self.name, leaf) for leaf in self.leaves}
+            for ns_name, namespace in self.sub_namespaces:
+                names | {"%s::%s" % (ns_name, rollup) for rollup in namespace.enumerate()}
+            return names
+        else:
+            parts = name.split(self.sep)
+            if len(parts) == 1:
+                if name in self.leaves:
+                    return set(parts[0])
+                elif name in self.sub_namespaces:
+                    return set(self.sub_namespaces[name].enumerate())
+                    raise ValueError('Undefined node or namespace name')
+                else:
+                    raise ValueError('Unknown namespace or leaf node name: "%s"' % name)
 
 #--------------------------------------------------------------------
 def singleton(f):
@@ -117,8 +196,65 @@ def inject(f):
     which can be overridden by resources in the injector.
     """
     attrs = MethodAttributes.for_method(f, write = True)
-    attrs.put('injection_point')
+    attrs.put('injection-point')
     return f
+
+#--------------------------------------------------------------------
+def named(name):
+    """
+    Method annotation indicating a name for the given resource other
+    than the name of the method itself.
+    """
+    def impl(f):
+        attrs = MethodAttributes.for_method(f, write = True)
+        attrs.put('name', name)
+        return f
+    return impl
+
+#--------------------------------------------------------------------
+def alias(alias, name):
+    """
+    Aliases a single resource to a different name in the given
+    module or resource context.
+    """
+    def impl(obj):
+        attrs = None
+        if inspect.isclass(obj):
+            attrs = ClassAttributes.for_class(obj, write = True)
+        else:
+            attrs = MethodAttributes.for_method(obj, write = True)
+        aliases = attrs.get('aliases', {})
+        aliases[alias] = name
+        attrs.put('aliases', aliases)
+        return obj
+    return impl
+
+#--------------------------------------------------------------------
+def namespace(name):
+    """
+    Module annotation indicating that the resources defined inside
+    should be scoped into the given namespace, that is the given
+    string is appended to all resource names followed by '::'.
+    """
+    def impl(clazz):
+        attrs = ClassAttributes.for_class(clazz, write = True)
+        attrs.put('namespace', name)
+        return clazz
+    return impl
+
+#--------------------------------------------------------------------
+def using(name):
+    def impl(obj):
+        attrs = None
+        if inspect.isclass(obj):
+            attrs = ClassAttributes.for_class(obj, write = True)
+        else:
+            attrs = MethodAttributes.for_method(obj, write = True)
+        namespaces = attrs.get('using-namespaces', [])
+        namespaces.append(name)
+        attrs.put('using-namespaces', namespaces)
+        return obj
+    return impl
 
 #--------------------------------------------------------------------
 def bind_unbound_method(obj, method):
@@ -143,7 +279,7 @@ def get_injection_points(obj):
     and return them as a stream of tuples.
     """
 
-    return scan_methods(obj, lambda attr: attr.check('injection_point'))
+    return scan_methods(obj, lambda attr: attr.check('injection-point'))
 
 #--------------------------------------------------------------------
 def get_providers(obj):
@@ -223,6 +359,7 @@ class Injector:
         self.singletons = {}
         self.dep_graph = {}
         self.injection_interceptors = []
+        self.ns_index = Namespace.root()
 
         for module in modules:
             self.add_module(module, skip_cycle_check = True)
@@ -234,8 +371,11 @@ class Injector:
         annotated methods, and these methods are added as resources to
         the injector.
         """
+        module_attrs = ClassAttributes.for_class(module.__class__)
+        module_aliases = self._get_aliases(module_attrs)
+        namespace = module_attrs.get('namespace', None)
         for attrs, provider in get_providers(module):
-            self._bind_resource(attrs.get('name'), provider)
+            self._bind_resource(provider, module_aliases, namespace)
 
         if not skip_cycle_check:
             self._check_for_cycles()
@@ -267,7 +407,7 @@ class Injector:
         """
         try:
             dependency_map = self._resolve_dependencies(clazz.__init__, unbound_ctor = True)
-            attrs = MethodAttributes.for_method(clazz.__init__, ctor = True)
+            attrs = MethodAttributes.for_method(clazz.__init__)
             dependency_map = self._invoke_injection_interceptors(attrs, dependency_map)
         except MethodInjectionError as e:
             raise ClassInjectionError(clazz, e.name)
@@ -276,19 +416,20 @@ class Injector:
         self._inject_instance(instance)
         return instance
 
-    def inject(self, obj):
+    def inject(self, obj, aliases = {}):
         """
         Inject a method or object instance with resources from this Injector.
 
-        obj: A method or object instance.  If this is a method, all named
+        obj:A method or object instance.  If this is a method, all named
              parameters are injected from the Injector.  If this is an instance,
              its methods are scanned for injection points and these methods
              are all invoked with resources from the Injector.
+        aliases: An optional map from dependency alias to real dependency name.
         """
         if inspect.isfunction(obj) or inspect.ismethod(obj):
-            return self._inject_method(obj)
+            return self._inject_method(obj, aliases)
         else:
-            return self._inject_instance(obj)
+            return self._inject_instance(obj, aliases)
 
     def require(self, name, method = None):
         """
@@ -304,6 +445,8 @@ class Injector:
             if method is not None:
                 raise MethodInjectionError(method, name, 'Resource was not provided.')
             else:
+                import pudb
+                pudb.set_trace()
                 raise InjectionError('The required resource "%s" was not provided.' % name)
         else:
             return self.resources[name]()
@@ -314,10 +457,17 @@ class Injector:
         """
         return name in self.resources
 
-    def _bind_resource(self, name, bound_method):
+    def _bind_resource(self, bound_method, module_aliases, namespace):
         params, _ = get_injection_params(bound_method)
         attrs = MethodAttributes.for_method(bound_method)
-        injected_method = self.inject(bound_method)
+
+        name = attrs.get('name')
+        if namespace is not None:
+            name = '%s::%s' % (namespace, name)
+
+        aliases = {**(self._get_aliases(attrs) or {}), **module_aliases}
+        injected_method = self.inject(bound_method, aliases)
+
         if attrs.check('singleton'):
             def wrapper():
                 if not name in self.singletons:
@@ -330,6 +480,7 @@ class Injector:
         else:
             resource = injected_method
 
+        self.ns_index.add(name)
         self.resources[name] = resource
         self.dep_graph[name] = params
 
@@ -346,24 +497,39 @@ class Injector:
         for resource in self.dep_graph.keys():
             visit(resource)
 
-    def _resolve_dependencies(self, f, unbound_ctor = False):
+    def _resolve_dependencies(self, f, unbound_ctor = False, aliases = {}):
         params, default_set = get_injection_params(f, unbound_ctor = unbound_ctor)
+        attrs = MethodAttributes.for_method(f)
         dependency_map = {}
         for param in params:
             if param in default_set and not self.has(param):
                 continue
-            dependency_map[param] = self.require(param)
+            resource_name = param
+            annotation = attrs.get_annotation(param)
+            if annotation is not None:
+                resource_name = annotation
+            visited = set()
+            while resource_name in aliases:
+                if resource_name in visited:
+                    raise InjectionError('Alias loop detected: %s -> %s' % (resource_name, ','.join(visited)))
+                resource_name = aliases[resource_name]
+                visited.add(resource_name)
+            dependency_map[param] = self.require(resource_name)
         return dependency_map
 
-    def _inject_instance(self, instance):
+    def _inject_instance(self, instance, aliases = {}):
+        class_attributes = ClassAttributes.for_class(instance.__class__)
+        aliases = {**aliases, **class_attributes.get('aliases', {})}
         for attrs, injection_point in get_injection_points(instance):
-            self.inject(injection_point)()
+            self.inject(injection_point, aliases)()
         return instance
 
-    def _inject_method(self, method):
+    def _inject_method(self, method, aliases_in = {}):
         def wrapper():
-            dependency_map = self._resolve_dependencies(method)
+            aliases = {**aliases_in}
             attrs = MethodAttributes.for_method(method)
+            aliases = {**aliases, **attrs.get('aliases', {})}
+            dependency_map = self._resolve_dependencies(method, aliases = aliases)
             depencency_map = self._invoke_injection_interceptors(attrs, dependency_map)
             return method(**dependency_map)
         return wrapper
@@ -372,4 +538,14 @@ class Injector:
         for interceptor in self.injection_interceptors:
             dependency_map = interceptor(attrs, dependency_map)
         return dependency_map
+
+    def _get_aliases(self, attrs):
+        aliases = attrs.get('aliases', {})
+        for alias in aliases.keys():
+            if self.ns_index.sep in alias:
+                raise InjectionError('Alias name may not contain the namespace separator: "%s"' % alias)
+        using_namespaces = attrs.get('using-namespaces', [])
+        for namespace in using_namespaces:
+            aliases = {**aliases, **{Namespace.leaf_name(name): name for name in self.ns_index.enumerate(namespace)}}
+        return aliases
 

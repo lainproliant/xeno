@@ -83,6 +83,22 @@ Checkout ``test.py`` in the git repo for more usage examples.
 Change Log
 ----------
 
+Version 1.7: May 16th, 2017
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- Major update, adding support for namespaces, aliases, and inline resource
+  parameter aliases.  See the unit tests in test.py for examples.
+  - Added @namespace('Name') decorator for modules to specify that all resources
+    defined in the module should be scoped within 'Name::'.
+  - Added @name('alt-name') to allow resources to be named something other than
+    the name of the function that defines them.
+  - Added @alias('alt-name', 'name') to allow a resource to be renamed within
+    either the scope of a single resource or a whole module.
+  - Added @using('NamespaceName') to allow the contents of the given namespace
+    to be automatically aliases into either the scope of a single resource or
+    a whole module.
+  - Added support for resource function annotations via PEP 3107 to allow
+    inline aliases, e.g. "def my_resource(name: 'Name::something-important')"
+
 Version 1.6: April 26th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 - Changed how xeno.MethodAttributes works: it now holds a map of attributes
