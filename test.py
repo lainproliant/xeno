@@ -68,6 +68,7 @@ class XenoTests(unittest.TestCase):
         self.assertEqual(printer.name, 'Lain')
 
     def test_missing_dependency_error(self):
+        @namespace("MissingStuff")
         class Module:
             @provide
             def name(self, last_name):
@@ -75,9 +76,28 @@ class XenoTests(unittest.TestCase):
 
         injector = Injector(Module())
         with self.assertRaises(MissingDependencyError) as context:
-            injector.require('name')
-        self.assertTrue(context.exception.name, 'name')
+            injector.require('MissingStuff::name')
+        self.assertTrue(context.exception.name, 'MissingStuff::name')
         self.assertTrue(context.exception.dep_name, 'last_name')
+
+    def test_namespace_internal_scope(self):
+        @namespace('NamesAndStuff')
+        class Module:
+            @provide
+            def name(self):
+                return 'Lain'
+
+            @provide
+            def last_name(self):
+                return 'Supe'
+
+            @provide
+            def full_name(self, name, last_name):
+                return '%s %s' % (name, last_name)
+
+        injector = Injector(Module())
+        full_name = injector.require('NamesAndStuff::full_name')
+        self.assertTrue(full_name, 'Lain Supe')
 
     def test_illegal_ctor_injection(self):
         """Test to verify that a constructor with invalid param types
