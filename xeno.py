@@ -57,6 +57,18 @@ class CircularDependencyError(InjectionError):
         self.dep = dep
 
 #--------------------------------------------------------------------
+class UndefinedNameError(InjectionError):
+    def __init__(self, name):
+        super().__init__('Undefined name: "%s"' % name)
+        self.name = name
+
+#--------------------------------------------------------------------
+class UnknownNamespaceError(InjectionError):
+    def __init__(self, name):
+        super().__init__('Unknown namespace: "%s"' % name)
+        self.name = name
+
+#--------------------------------------------------------------------
 class Attributes:
     def __init__(self):
         self.attr_map = {}
@@ -165,19 +177,25 @@ class Namespace:
 
     def enumerate(self, name = None):
         if name is None:
-            names = set() | {"%s::%s" % (self.name, leaf) for leaf in self.leaves}
+            names = set() | {"%s%s%s" % (self.name, self.sep, leaf) for leaf in self.leaves}
             for ns_name, namespace in self.sub_namespaces:
-                names | {"%s::%s" % (ns_name, rollup) for rollup in namespace.enumerate()}
+                names | {"%s%s%s" % (ns_name, self.sep, rollup) for rollup in namespace.enumerate()}
             return names
         else:
             parts = name.split(self.sep)
             if len(parts) == 1:
                 if name in self.leaves:
-                    return set(parts[0])
+                    return set(name)
                 elif name in self.sub_namespaces:
                     return set(self.sub_namespaces[name].enumerate())
                 else:
-                    raise ValueError('Unknown namespace or leaf node name: "%s"' % name)
+                    raise UndefinedNameError(name)
+            else:
+                if parts[0] in self.sub_namespaces:
+                    return ['%s%s%s' % (parts[0], self.sep, x)
+                            for x in self.sub_namespaces[parts[0]].enumerate(self.sep.join(parts[1:]))]
+                else:
+                    raise UnknownNamespaceError(parts[0])
 
 #--------------------------------------------------------------------
 def singleton(f):

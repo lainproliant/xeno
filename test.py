@@ -373,6 +373,30 @@ class XenoTests(unittest.TestCase):
             injector.require('person_name')
         self.assertTrue(str(context.exception).startswith('Alias loop detected'))
 
+    def test_nested_namespaces(self):
+        @namespace("com::lainproliant::stuff")
+        class ModuleA:
+            @provide
+            def name(self):
+                return 'Lain Supe'
+
+        @namespace("com::lainproliant::other_stuff")
+        class ModuleB:
+            @provide
+            def address(self, name: 'com::lainproliant::stuff::name'):
+                return '%s: Seattle, WA' % name
+        
+        @using("com::lainproliant::other_stuff")
+        class ModuleC:
+            @provide
+            @named('address-with-zip')
+            def address(self, address):
+                return address + ' 98119'
+
+        injector = Injector(ModuleA(), ModuleB(), ModuleC())
+        address = injector.require('address-with-zip')
+        self.assertEqual(address, 'Lain Supe: Seattle, WA 98119')
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()
