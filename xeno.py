@@ -445,8 +445,6 @@ class Injector:
             if method is not None:
                 raise MethodInjectionError(method, name, 'Resource was not provided.')
             else:
-                import pudb
-                pudb.set_trace()
                 raise InjectionError('The required resource "%s" was not provided.' % name)
         else:
             return self.resources[name]()
