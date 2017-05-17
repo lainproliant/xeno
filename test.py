@@ -67,6 +67,18 @@ class XenoTests(unittest.TestCase):
         injector.inject(printer)
         self.assertEqual(printer.name, 'Lain')
 
+    def test_missing_dependency_error(self):
+        class Module:
+            @provide
+            def name(self, last_name):
+                return 'Lain %s' % last_name
+
+        injector = Injector(Module())
+        with self.assertRaises(MissingDependencyError) as context:
+            injector.require('name')
+        self.assertTrue(context.exception.name, 'name')
+        self.assertTrue(context.exception.dep_name, 'last_name')
+
     def test_illegal_ctor_injection(self):
         """Test to verify that a constructor with invalid param types
            is not injectable."""

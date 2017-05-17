@@ -17,6 +17,20 @@ class InjectionError(Exception):
     pass
 
 #--------------------------------------------------------------------
+class MissingResourceError(InjectionError):
+    def __init__(self, name):
+        super().__init__('The resource "%s" was not provided.' % name)
+        self.name = name
+
+#--------------------------------------------------------------------
+class MissingDependencyError(InjectionError):
+    def __init__(self, name, dep_name):
+        super().__init__('The resource "%s" required by "%s" was not provided.' % (
+            name, dep_name))
+        self.name = name
+        self.dep_name = dep_name
+
+#--------------------------------------------------------------------
 class MethodInjectionError(InjectionError):
     def __init__(self, method, name, reason = None):
         super().__init__('Failed to inject "%s" into method "%s".' % (
@@ -445,7 +459,7 @@ class Injector:
             if method is not None:
                 raise MethodInjectionError(method, name, 'Resource was not provided.')
             else:
-                raise InjectionError('The required resource "%s" was not provided.' % name)
+                raise MissingResourceError(name)
         else:
             return self.resources[name]()
 
@@ -512,7 +526,10 @@ class Injector:
                     raise InjectionError('Alias loop detected: %s -> %s' % (resource_name, ','.join(visited)))
                 resource_name = aliases[resource_name]
                 visited.add(resource_name)
-            dependency_map[param] = self.require(resource_name)
+            try:
+                dependency_map[param] = self.require(resource_name)
+            except MissingResourceError as e:
+                raise MissingDependencyError(attrs.get('name'), e.name) from e
         return dependency_map
 
     def _inject_instance(self, instance, aliases = {}):

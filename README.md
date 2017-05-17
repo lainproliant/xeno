@@ -82,6 +82,9 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 1.8: May 16th, 2017
+- Add `MissingResourceError` and `MissingDependencyError` exception types.
+
 ### Version 1.7: May 16th, 2017
 - Major update, adding support for namespaces, aliases, and inline resource parameter aliases.  See the unit tests in test.py for examples.
   - Added `@namespace('Name')` decorator for modules to specify that all resources defined in the module should be scoped within 'Name::'.

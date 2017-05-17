@@ -90,6 +90,12 @@ Checkout ``test.py`` in the git repo for more usage examples.
 Change Log
 ----------
 
+Version 1.8: May 16th, 2017
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Add ``MissingResourceError`` and ``MissingDependencyError`` exception
+   types.
+
 Version 1.7: May 16th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
