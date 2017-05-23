@@ -397,6 +397,23 @@ class XenoTests(unittest.TestCase):
         address = injector.require('address-with-zip')
         self.assertEqual(address, 'Lain Supe: Seattle, WA 98119')
 
+    def overwrite_namespaced_variable(self):
+        @namespace("com::lainproliant")
+        class ModuleA:
+            @provide
+            def name(self):
+                return "Lain Supe"
+
+        class ModuleB:
+            @provide
+            @named("com::lainproliant::name")
+            def name(self):
+                return "Jenna Musgrove"
+
+        injector = Injector(ModuleA(), ModuleB())
+        name = injector.require('com::lainproliant::name')
+        self.assertEqual(name, 'Jenna Musgrove')
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()
