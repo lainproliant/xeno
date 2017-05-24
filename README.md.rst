@@ -1,8 +1,3 @@
-.. figure:: https://raw.githubusercontent.com/lainproliant/xeno/master/pachimari.jpg
-   :alt: Pachimari, unofficial xeno mascot
-
-   Pachimari, unofficial xeno mascot
-
 Xeno: The Python dependency injector from outer space.
 ======================================================
 
@@ -89,6 +84,13 @@ Checkout ``test.py`` in the git repo for more usage examples.
 
 Change Log
 ----------
+
+Version 1.9: May 23rd, 2017
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Add ``@const()`` module annotation for value-based resources
+-  Add ``Injector.get_dependency_tree()`` to fetch a tree of dependency
+   names for a given resource name.
 
 Version 1.8: May 16th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
