@@ -287,6 +287,20 @@ def namespace(name):
     return impl
 
 #--------------------------------------------------------------------
+def const(name, value):
+    """
+    Module annotation defining a constant resource scoped into the
+    module's namespace.
+    """
+    def impl(clazz):
+        attrs = ClassAttributes.for_class(clazz, write = True)
+        const_map = attrs.get('const_map', {})
+        const_map[name] = value
+        attrs.put('const_map', const_map)
+        return clazz
+    return impl
+
+#--------------------------------------------------------------------
 def using(name):
     def impl(obj):
         attrs = None
@@ -422,6 +436,13 @@ class Injector:
             using_namespaces.append(namespace)
             self.ns_index.add_namespace(namespace)
         module_aliases = self._get_aliases(module_attrs, using_namespaces)
+        for name, value in module_attrs.get('const_map', {}):
+            const_name = name
+            if namespace is not None:
+                const_name = "%s::%s" % (namespace, name)
+            self.ns_index.add(const_name)
+            self.resources[const_name] = lambda: self.singletons[const_name]
+            self.singletons[const_name] = value
         for attrs, provider in get_providers(module):
             self._bind_resource(provider, module_aliases, namespace)
 
@@ -502,6 +523,11 @@ class Injector:
         Determine if this Injector has been provided with the named resource.
         """
         return name in self.resources
+
+    def get_dependency_tree(self, resource_name):
+        if not resource_name in self.resources:
+            raise MissingResourceError(resource_name)
+        return {dep: self.get_dependency_tree(dep) for dep in self.dep_graph.get(resource_name, {})}
 
     def _bind_resource(self, bound_method, module_aliases, namespace):
         params, _ = get_injection_params(bound_method)

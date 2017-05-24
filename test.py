@@ -414,6 +414,32 @@ class XenoTests(unittest.TestCase):
         name = injector.require('com::lainproliant::name')
         self.assertEqual(name, 'Jenna Musgrove')
 
+    def dependency_tree(self):
+        @const('first_name', 'Lain')
+        @const('last_name', 'Supe')
+        @const('street', '1024 Street Ave')
+        @const('city', 'Seattle, WA')
+        @const('zip_code', 98101)
+        class ModuleA:
+            @provide
+            def name(self, first_name, last_name):
+                return "%s %s" % (first_name, last_name)
+
+            @provide
+            def address(self, name, street, city, zip_code):
+                return "%s\n%s\n%s %d" % (name, street, city, zip_code)
+
+        injector = Injector(ModuleA())
+        address = injector.require('address')
+        dep_tree = injector.get_dependency_tree('address')
+        self.assertTrue('name' in dep_tree)
+        self.assertTrue('street' in dep_tree)
+        self.assertTrue('city' in dep_tree)
+        self.assertTrue('zip_code' in dep_tree)
+        self.assertTrue('first_name' in dep_tree['name'])
+        self.assertTrue('last_name' in dep_tree['last_name'])
+        self.assertEqual('Lain Supe\n1024 Street Ave\nSeattle, WA 98101', address)
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()

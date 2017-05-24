@@ -1,5 +1,3 @@
-![Pachimari, unofficial xeno mascot](https://raw.githubusercontent.com/lainproliant/xeno/master/pachimari.jpg)
-
 # Xeno: The Python dependency injector from outer space.
 
 Xeno is a simple Python dependency injection framework. Use it when you
@@ -81,6 +79,10 @@ writer.write_version()
 Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
+
+### Version 1.9: May 23rd, 2017
+- Add `@const()` module annotation for value-based resources
+- Add `Injector.get_dependency_tree()` to fetch a tree of dependency names for a given resource name.
 
 ### Version 1.8: May 16th, 2017
 - Add `MissingResourceError` and `MissingDependencyError` exception types.
