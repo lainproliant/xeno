@@ -41,11 +41,11 @@ class MethodInjectionError(InjectionError):
 
 #--------------------------------------------------------------------
 class ClassInjectionError(InjectionError):
-    def __init__(self, clazz, name, reason = None):
+    def __init__(self, class_, name, reason = None):
         super().__init__('Failed to inject "%s" into constructor for class "%s".' % (
             name,
-            clazz.__qualname__) + reason or "")
-        self.clazz = clazz
+            class_.__qualname__) + reason or "")
+        self.class_ = class_
         self.name = name
 
 #--------------------------------------------------------------------
@@ -105,13 +105,13 @@ class Attributes:
 #--------------------------------------------------------------------
 class ClassAttributes(Attributes):
     @staticmethod
-    def for_class(clazz, create = True, write = False):
-        return Attributes.for_object(clazz, create, write, factory = lambda x: ClassAttributes(x))
+    def for_class(class_, create = True, write = False):
+        return Attributes.for_object(class_, create, write, factory = lambda x: ClassAttributes(x))
 
-    def __init__(self, clazz):
+    def __init__(self, class_):
         super().__init__()
-        self.put('name', clazz.__name__)
-        self.put('qualname', clazz.__qualname__)
+        self.put('name', class_.__name__)
+        self.put('qualname', class_.__qualname__)
 
 #--------------------------------------------------------------------
 class MethodAttributes(Attributes):
@@ -280,10 +280,10 @@ def namespace(name):
     should be scoped into the given namespace, that is the given
     string is appended to all resource names followed by '::'.
     """
-    def impl(clazz):
-        attrs = ClassAttributes.for_class(clazz, write = True)
+    def impl(class_):
+        attrs = ClassAttributes.for_class(class_, write = True)
         attrs.put('namespace', name)
-        return clazz
+        return class_
     return impl
 
 #--------------------------------------------------------------------
@@ -292,12 +292,12 @@ def const(name, value):
     Module annotation defining a constant resource scoped into the
     module's namespace.
     """
-    def impl(clazz):
-        attrs = ClassAttributes.for_class(clazz, write = True)
+    def impl(class_):
+        attrs = ClassAttributes.for_class(class_, write = True)
         const_map = attrs.get('const_map', {})
         const_map[name] = value
         attrs.put('const_map', const_map)
-        return clazz
+        return class_
     return impl
 
 #--------------------------------------------------------------------
@@ -324,8 +324,8 @@ def scan_methods(obj, filter_f):
     Scan the object for methods that match the given attribute filter
     and return them as a stream of tuples.
     """
-    for clazz in inspect.getmro(obj.__class__):
-        for name, method in inspect.getmembers(clazz, predicate = inspect.isfunction):
+    for class_ in inspect.getmro(obj.__class__):
+        for name, method in inspect.getmembers(class_, predicate = inspect.isfunction):
             attrs = MethodAttributes.for_method(method, create = False)
             if attrs is not None and filter_f(attrs):
                 yield (attrs, bind_unbound_method(obj, method))
@@ -436,13 +436,8 @@ class Injector:
             using_namespaces.append(namespace)
             self.ns_index.add_namespace(namespace)
         module_aliases = self._get_aliases(module_attrs, using_namespaces)
-        for name, value in module_attrs.get('const_map', {}):
-            const_name = name
-            if namespace is not None:
-                const_name = "%s::%s" % (namespace, name)
-            self.ns_index.add(const_name)
-            self.resources[const_name] = lambda: self.singletons[const_name]
-            self.singletons[const_name] = value
+        for name, value in module_attrs.get('const_map', {}).items():
+            self.provide(name, value, is_singleton = True, namespace = namespace)
         for attrs, provider in get_providers(module):
             self._bind_resource(provider, module_aliases, namespace)
 
@@ -463,7 +458,7 @@ class Injector:
         """
         self.injection_interceptors.append(interceptor)
 
-    def create(self, clazz):
+    def create(self, class_):
         """
         Create an instance of the specified class.  The class' constructor
         must follow the rules for @inject methods, such that all of its
@@ -475,13 +470,13 @@ class Injector:
         methods with @inject and pass the instance to Injector.inject().
         """
         try:
-            dependency_map = self._resolve_dependencies(clazz.__init__, unbound_ctor = True)
-            attrs = MethodAttributes.for_method(clazz.__init__)
+            dependency_map = self._resolve_dependencies(class_.__init__, unbound_ctor = True)
+            attrs = MethodAttributes.for_method(class_.__init__)
             dependency_map = self._invoke_injection_interceptors(attrs, dependency_map)
         except MethodInjectionError as e:
-            raise ClassInjectionError(clazz, e.name)
+            raise ClassInjectionError(class_, e.name)
 
-        instance = clazz(**dependency_map)
+        instance = class_(**dependency_map)
         self._inject_instance(instance)
         return instance
 
@@ -518,6 +513,19 @@ class Injector:
         else:
             return self.resources[name]()
 
+    def provide(self, name, value, is_singleton = False, namespace = None):
+        if inspect.ismethod(value) or inspect.isfunction(value):
+            if is_singleton:
+                value = singleton(value)
+            self._bind_resource(resource, namespace = namespace)
+        else:
+            @named(name)
+            def wrapper():
+                return value
+            if is_singleton:
+                wrapper = singleton(wrapper)
+            self._bind_resource(wrapper, namespace = namespace)
+
     def has(self, name):
         """
         Determine if this Injector has been provided with the named resource.
@@ -529,7 +537,7 @@ class Injector:
             raise MissingResourceError(resource_name)
         return {dep: self.get_dependency_tree(dep) for dep in self.dep_graph.get(resource_name, {})}
 
-    def _bind_resource(self, bound_method, module_aliases, namespace):
+    def _bind_resource(self, bound_method, module_aliases = {}, namespace = None):
         params, _ = get_injection_params(bound_method)
         attrs = MethodAttributes.for_method(bound_method)
 

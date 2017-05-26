@@ -397,7 +397,7 @@ class XenoTests(unittest.TestCase):
         address = injector.require('address-with-zip')
         self.assertEqual(address, 'Lain Supe: Seattle, WA 98119')
 
-    def overwrite_namespaced_variable(self):
+    def test_overwrite_namespaced_variable(self):
         @namespace("com::lainproliant")
         class ModuleA:
             @provide
@@ -414,9 +414,9 @@ class XenoTests(unittest.TestCase):
         name = injector.require('com::lainproliant::name')
         self.assertEqual(name, 'Jenna Musgrove')
 
-    def dependency_tree(self):
-        @const('first_name', 'Lain')
-        @const('last_name', 'Supe')
+    def test_dependency_tree(self):
+        @const('last_name', 'Rex')
+        @const('first_name', 'Pontifex')
         @const('street', '1024 Street Ave')
         @const('city', 'Seattle, WA')
         @const('zip_code', 98101)
@@ -437,8 +437,39 @@ class XenoTests(unittest.TestCase):
         self.assertTrue('city' in dep_tree)
         self.assertTrue('zip_code' in dep_tree)
         self.assertTrue('first_name' in dep_tree['name'])
-        self.assertTrue('last_name' in dep_tree['last_name'])
-        self.assertEqual('Lain Supe\n1024 Street Ave\nSeattle, WA 98101', address)
+        self.assertTrue('last_name' in dep_tree['name'])
+        self.assertEqual('Pontifex Rex\n1024 Street Ave\nSeattle, WA 98101', address)
+
+    def test_injector_provide(self):
+        class ModuleA:
+            @provide
+            def a(self, b):
+                return b + 2
+
+            @provide
+            def b(self):
+                return 1
+
+            @singleton
+            def c(self, a, b):
+                return a + b + 1
+
+        injector = Injector(ModuleA())
+        self.assertEqual(injector.require('a'), 3)
+        self.assertEqual(injector.require('b'), 1)
+        self.assertEqual(injector.require('c'), 5)
+        injector.provide('b', 3)
+        self.assertEqual(injector.require('a'), 5)
+        self.assertEqual(injector.require('b'), 3)
+        self.assertEqual(injector.require('c'), 5) # singleton should not change
+        injector.provide('a', 1)
+        self.assertEqual(injector.require('a'), 1)
+        self.assertEqual(injector.require('b'), 3)
+        self.assertEqual(injector.require('c'), 5) # singleton should not change
+        injector.provide('c', 6)
+        self.assertEqual(injector.require('a'), 1)
+        self.assertEqual(injector.require('b'), 3)
+        self.assertEqual(injector.require('c'), 6) # singleton was replaced
 
 #--------------------------------------------------------------------
 if __name__ == '__main__':
