@@ -390,6 +390,16 @@ def get_injection_params(f, unbound_ctor = False):
     return injection_param_names, default_param_set
 
 #--------------------------------------------------------------------
+def resolve_alias(name, aliases):
+    visited = set()
+    while name in aliases:
+        if name in visited:
+            raise InjectionError('Alias loop detected: %s -> %s' % (name, ','.join(visited)))
+        name = aliases[name]
+        visited.add(name)
+    return name
+
+#--------------------------------------------------------------------
 class Injector:
     """
     An object responsible for collecting resources from modules and
@@ -534,6 +544,8 @@ class Injector:
 
     def get_dependency_tree(self, resource_name):
         if not resource_name in self.resources:
+            import pudb
+            pudb.set_trace()
             raise MissingResourceError(resource_name)
         return {dep: self.get_dependency_tree(dep) for dep in self.dep_graph.get(resource_name, {})}
 
@@ -564,7 +576,7 @@ class Injector:
 
         self.ns_index.add(name)
         self.resources[name] = resource
-        self.dep_graph[name] = params
+        self.dep_graph[name] = [resolve_alias(x, aliases) for x in params]
 
     def _check_for_cycles(self):
         visited = set()
@@ -595,12 +607,7 @@ class Injector:
             annotation = attrs.get_annotation(param)
             if annotation is not None:
                 resource_name = annotation
-            visited = set()
-            while resource_name in aliases:
-                if resource_name in visited:
-                    raise InjectionError('Alias loop detected: %s -> %s' % (full_name, ','.join(visited)))
-                resource_name = aliases[resource_name]
-                visited.add(resource_name)
+            resource_name = resolve_alias(resource_name, aliases)
             try:
                 dependency_map[param] = self.require(resource_name)
             except MissingResourceError as e:

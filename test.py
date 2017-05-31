@@ -368,9 +368,8 @@ class XenoTests(unittest.TestCase):
             def person_name(self, full_name):
                 return full_name
 
-        injector = Injector(ModuleA())
         with self.assertRaises(InjectionError) as context:
-            injector.require('person_name')
+            injector = Injector(ModuleA())
         self.assertTrue(str(context.exception).startswith('Alias loop detected'))
 
     def test_nested_namespaces(self):
