@@ -544,8 +544,6 @@ class Injector:
 
     def get_dependency_tree(self, resource_name):
         if not resource_name in self.resources:
-            import pudb
-            pudb.set_trace()
             raise MissingResourceError(resource_name)
         return {dep: self.get_dependency_tree(dep) for dep in self.dep_graph.get(resource_name, {})}
 
