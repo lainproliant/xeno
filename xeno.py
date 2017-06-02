@@ -545,7 +545,10 @@ class Injector:
     def get_dependency_tree(self, resource_name):
         if not resource_name in self.resources:
             raise MissingResourceError(resource_name)
-        return {dep: self.get_dependency_tree(dep) for dep in self.dep_graph.get(resource_name, {})}
+        try:
+            return {dep: self.get_dependency_tree(dep) for dep in self.dep_graph.get(resource_name, lambda: ())()}
+        except MissingResourceError as e:
+            raise MissingResourceError('%s -> %s' % (resource_name, e.name))
 
     def _bind_resource(self, bound_method, module_aliases = {}, namespace = None):
         params, _ = get_injection_params(bound_method)
@@ -557,7 +560,10 @@ class Injector:
             name = '%s::%s' % (namespace, name)
             using_namespaces.append(namespace)
 
-        aliases = {**(self._get_aliases(attrs, using_namespaces) or {}), **module_aliases}
+        def get_aliases():
+            return {**(self._get_aliases(attrs, using_namespaces) or {}), **module_aliases}
+        
+        aliases = get_aliases()
         injected_method = self.inject(bound_method, aliases, namespace)
 
         if attrs.check('singleton'):
@@ -574,14 +580,14 @@ class Injector:
 
         self.ns_index.add(name)
         self.resources[name] = resource
-        self.dep_graph[name] = [resolve_alias(x, aliases) for x in params]
+        self.dep_graph[name] = lambda: [resolve_alias(x, get_aliases()) for x in params]
 
     def _check_for_cycles(self):
         visited = set()
 
         def visit(resource):
             visited.add(resource)
-            for dep in self.dep_graph.get(resource, ()):
+            for dep in self.dep_graph.get(resource, lambda: ())():
                 if dep in visited or visit(dep):
                     raise CircularDependencyError(resource, dep)
             visited.remove(resource)
