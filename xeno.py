@@ -548,7 +548,18 @@ class Injector:
         try:
             return {dep: self.get_dependency_tree(dep) for dep in self.dep_graph.get(resource_name, lambda: ())()}
         except MissingResourceError as e:
-            raise MissingResourceError('%s -> %s' % (resource_name, e.name))
+            raise MissingDependencyError(resource_name, e.name)
+
+    def get_dependency_graph(self, resource_name):
+        if not resource_name in self.resources:
+            raise MissingResourceError(resource_name)
+        try:
+            dep_graph = {resource_name: self.dep_graph.get(resource_name, lambda: ())()}
+            for dep in dep_graph[resource_name]:
+                dep_graph.update(self.get_dependency_graph(dep))
+            return dep_graph
+        except MissingResourceError as e:
+            raise MissingDependencyError(resource_name, e.name)
 
     def _bind_resource(self, bound_method, module_aliases = {}, namespace = None):
         params, _ = get_injection_params(bound_method)
@@ -562,7 +573,7 @@ class Injector:
 
         def get_aliases():
             return {**(self._get_aliases(attrs, using_namespaces) or {}), **module_aliases}
-        
+
         aliases = get_aliases()
         injected_method = self.inject(bound_method, aliases, namespace)
 

@@ -384,7 +384,7 @@ class XenoTests(unittest.TestCase):
             @provide
             def address(self, name: 'com::lainproliant::stuff::name'):
                 return '%s: Seattle, WA' % name
-        
+
         @using("com::lainproliant::other_stuff")
         class ModuleC:
             @provide
@@ -469,6 +469,37 @@ class XenoTests(unittest.TestCase):
         self.assertEqual(injector.require('a'), 1)
         self.assertEqual(injector.require('b'), 3)
         self.assertEqual(injector.require('c'), 6) # singleton was replaced
+
+    def test_dependency_graph(self):
+        class ModuleA:
+            @provide
+            def a(self, b):
+                return b + 1
+
+            @provide
+            def b(self):
+                return 1
+
+            @provide
+            def c(self, a, b):
+                return a + b + 1
+
+        injector = Injector(ModuleA())
+        dep_graph_a = injector.get_dependency_graph('a')
+        dep_graph_b = injector.get_dependency_graph('b')
+        dep_graph_c = injector.get_dependency_graph('c')
+
+        self.assertListEqual([*sorted(dep_graph_a['a'])], ['b'])
+        self.assertListEqual([*sorted(dep_graph_a['b'])], [])
+        self.assertEqual(len(dep_graph_a), 2)
+
+        self.assertListEqual([*sorted(dep_graph_b['b'])], [])
+        self.assertEqual(len(dep_graph_b), 1)
+
+        self.assertListEqual([*sorted(dep_graph_c['a'])], ['b'])
+        self.assertListEqual([*sorted(dep_graph_c['b'])], [])
+        self.assertListEqual([*sorted(dep_graph_c['c'])], ['a', 'b'])
+        self.assertEqual(len(dep_graph_c), 3)
 
 #--------------------------------------------------------------------
 if __name__ == '__main__':
