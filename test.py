@@ -501,6 +501,20 @@ class XenoTests(unittest.TestCase):
         self.assertListEqual([*sorted(dep_graph_c['c'])], ['a', 'b'])
         self.assertEqual(len(dep_graph_c), 3)
 
+    def test_get_resource_attrs(self):
+        class ModuleA:
+            @singleton
+            def a(self):
+                return 1
+            
+            @provide
+            def b(self):
+                return 0
+
+        injector = Injector(ModuleA())
+        self.assertTrue(injector.get_resource_attributes('a').check('singleton'))
+        self.assertFalse(injector.get_resource_attributes('b').check('singleton'))
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()

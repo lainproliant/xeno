@@ -428,6 +428,7 @@ class Injector:
         self.dep_graph = {}
         self.injection_interceptors = []
         self.ns_index = Namespace.root()
+        self.resource_attrs = {}
 
         for module in modules:
             self.add_module(module, skip_cycle_check = True)
@@ -561,6 +562,11 @@ class Injector:
         except MissingResourceError as e:
             raise MissingDependencyError(resource_name, e.name)
 
+    def get_resource_attributes(self, resource_name):
+        if not resource_name in self.resource_attrs:
+            raise MissingResourceError(resource_name)
+        return self.resource_attrs[resource_name]
+
     def _bind_resource(self, bound_method, module_aliases = {}, namespace = None):
         params, _ = get_injection_params(bound_method)
         attrs = MethodAttributes.for_method(bound_method)
@@ -591,6 +597,7 @@ class Injector:
 
         self.ns_index.add(name)
         self.resources[name] = resource
+        self.resource_attrs[name] = attrs
         self.dep_graph[name] = lambda: [resolve_alias(x, get_aliases()) for x in params]
 
     def _check_for_cycles(self):
