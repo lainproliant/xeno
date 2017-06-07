@@ -69,6 +69,10 @@ class UnknownNamespaceError(InjectionError):
         self.name = name
 
 #--------------------------------------------------------------------
+class InvalidResourceError(InjectionError):
+    pass
+
+#--------------------------------------------------------------------
 class Attributes:
     def __init__(self):
         self.attr_map = {}
@@ -566,6 +570,17 @@ class Injector:
         if not resource_name in self.resource_attrs:
             raise MissingResourceError(resource_name)
         return self.resource_attrs[resource_name]
+
+    def unbind_singleton(self, resource_name = None, unbind_all = False):
+        if unbind_all:
+            self.singletons.clear()
+        else:
+            if not resource_name in self.resources:
+                raise MissingResourceError(resource_name)
+            if not self.get_resource_attributes(resource_name).check('singleton'):
+                raise InvalidResourceError('Resource "%s" is not a singleton.' % resource_name)
+            if resource_name in self.singletons:
+                del self.singletons[resource_name]
 
     def _bind_resource(self, bound_method, module_aliases = {}, namespace = None):
         params, _ = get_injection_params(bound_method)

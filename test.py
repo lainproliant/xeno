@@ -515,6 +515,52 @@ class XenoTests(unittest.TestCase):
         self.assertTrue(injector.get_resource_attributes('a').check('singleton'))
         self.assertFalse(injector.get_resource_attributes('b').check('singleton'))
 
+    def test_unbind_singletons(self):
+        class ModuleA:
+            @singleton
+            def a(self, b):
+                return b + 1
+
+            @provide
+            def b(self):
+                return 1
+
+            @singleton
+            def c(self, a):
+                return str(a)
+
+        injector = Injector(ModuleA())
+        self.assertEqual(injector.require('a'), 2)
+        self.assertEqual(injector.require('b'), 1)
+        self.assertEqual(injector.require('c'), "2")
+
+        injector.provide('b', 10)
+        self.assertEqual(injector.require('a'), 2)
+        self.assertEqual(injector.require('b'), 10)
+        self.assertEqual(injector.require('c'), "2")
+
+        with self.assertRaises(MissingResourceError):
+            injector.unbind_singleton('d')
+
+        with self.assertRaises(InvalidResourceError):
+            injector.unbind_singleton('b')
+
+        injector.unbind_singleton('a')
+        self.assertEqual(injector.require('a'), 11)
+        self.assertEqual(injector.require('b'), 10)
+        self.assertEqual(injector.require('c'), "2")
+
+        injector.unbind_singleton('c')
+        self.assertEqual(injector.require('a'), 11)
+        self.assertEqual(injector.require('b'), 10)
+        self.assertEqual(injector.require('c'), "11")
+
+        injector.provide('b', 100)
+        injector.unbind_singleton(unbind_all = True)
+        self.assertEqual(injector.require('a'), 101)
+        self.assertEqual(injector.require('b'), 100)
+        self.assertEqual(injector.require('c'), "101")
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()
