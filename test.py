@@ -583,13 +583,19 @@ class XenoTests(unittest.TestCase):
             def address(self):
                 return '123 Main St.'
 
+            @provide
+            def first_name(self, name: '::A::first_name'):
+                return name[::-1]
+
         injector = Injector(ModuleA(), ModuleB())
         first_name = injector.require('A::first_name')
         last_name = injector.require('A::last_name')
         address = injector.require('B::address')
+        weird_name = injector.require('B::first_name')
         self.assertEqual(first_name, 'Lain')
         self.assertEqual(last_name, 'Musgrove')
         self.assertEqual(address, '123 Main St.')
+        self.assertEqual(weird_name, 'niaL')
 
 #--------------------------------------------------------------------
 if __name__ == '__main__':
