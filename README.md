@@ -80,6 +80,15 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 2.0.0: July 25th, 2017
+- Change the default namespace separator and breakout symbol to '/' (backwards incompatible change)
+
+Code using the old namespace separator can be made to work by overriding the value of xeno.Namespace.SEP:
+```
+import xeno
+xeno.Namespace.SEP = '::'
+```
+
 ### Version 1.10: July 25th, 2017
 - Allow names prefixed with `::` to escape their module's namespace, e.g. `::top_level_item`
 

@@ -135,25 +135,29 @@ class MethodAttributes(Attributes):
 #--------------------------------------------------------------------
 class Namespace:
     ROOT = '@root'
+    SEP = '/'
+    
+    @staticmethod
+    def join(*args):
+        return Namespace.SEP.join(args)
 
     @staticmethod
-    def root(sep = '::'):
-        return Namespace(Namespace.ROOT, sep = sep)
+    def root():
+        return Namespace(Namespace.ROOT)
 
     @staticmethod
-    def leaf_name(name, sep = '::'):
-        return name.split(sep)[-1]
+    def leaf_name(name):
+        return name.split(Namespace.SEP)[-1]
 
-    def __init__(self, name, sep = '::'):
+    def __init__(self, name):
         self.name = name
         self.sub_namespaces = {}
         self.leaves = set()
-        self.sep = sep
 
     def add(self, name):
         if not name:
             raise ValueError('Leaf node name is empty!')
-        parts = name.split(self.sep)
+        parts = name.split(Namespace.SEP)
         if len(parts) == 1:
             if name in self.sub_namespaces:
                 raise ValueError('Leaf node cannot have the same name as an existing namespace: "%s"' % name)
@@ -164,12 +168,12 @@ class Namespace:
                     raise ValueError('Namespace cannot have the same name as an existing leaf node: "%s"' % parts[0])
                 self.sub_namespaces[parts[0]] = Namespace(parts[0])
             namespace = self.sub_namespaces[parts[0]]
-            namespace.add(self.sep.join(parts[1:]))
+            namespace.add(Namespace.join(*parts[1:]))
 
     def add_namespace(self, name):
         if not name:
             raise ValueError('Namespace name is empty!')
-        parts = name.split(self.sep)
+        parts = name.split(Namespace.SEP)
         ns = self
         for part in parts:
             if part in ns.sub_namespaces:
@@ -181,12 +185,12 @@ class Namespace:
 
     def enumerate(self, name = None):
         if name is None:
-            names = set() | {"%s%s%s" % (self.name, self.sep, leaf) for leaf in self.leaves}
+            names = set() | {Namespace.join(self.name, leaf) for leaf in self.leaves}
             for ns_name, namespace in self.sub_namespaces:
-                names | {"%s%s%s" % (ns_name, self.sep, rollup) for rollup in namespace.enumerate()}
+                names | {Namespace.join(ns_name, rollup) for rollup in namespace.enumerate()}
             return names
         else:
-            parts = name.split(self.sep)
+            parts = name.split(Namespace.SEP)
             if len(parts) == 1:
                 if name in self.leaves:
                     return set(name)
@@ -196,8 +200,8 @@ class Namespace:
                     raise UndefinedNameError(name)
             else:
                 if parts[0] in self.sub_namespaces:
-                    return ['%s%s%s' % (parts[0], self.sep, x)
-                            for x in self.sub_namespaces[parts[0]].enumerate(self.sep.join(parts[1:]))]
+                    return [Namespace.join(parts[0], x)
+                            for x in self.sub_namespaces[parts[0]].enumerate(Namespace.join(*parts[1:]))]
                 else:
                     raise UnknownNamespaceError(parts[0])
 
@@ -282,7 +286,7 @@ def namespace(name):
     """
     Module annotation indicating that the resources defined inside
     should be scoped into the given namespace, that is the given
-    string is appended to all resource names followed by '::'.
+    string is appended to all resource names followed by '/'.
     """
     def impl(class_):
         attrs = ClassAttributes.for_class(class_, write = True)
@@ -590,10 +594,10 @@ class Injector:
         name = attrs.get('name')
         # Allow names that begin with the namespace separator
         # to be scoped outside of the specified namespace.
-        if name.startswith('::'):
-            name = name[2:]
+        if name.startswith(Namespace.SEP):
+            name = name[len(Namespace.SEP):]
         elif namespace is not None:
-            name = '%s::%s' % (namespace, name)
+            name = Namespace.join(namespace, name)
             using_namespaces.append(namespace)
 
         def get_aliases():
@@ -638,7 +642,7 @@ class Injector:
         dependency_map = {}
         full_name = attrs.get('name')
         if namespace:
-            full_name = "%s::%s" % (namespace, full_name)
+            full_name = Namespace.join(namespace, full_name)
             aliases = {**aliases, **self._get_aliases(attrs, [namespace])}
 
         for param in params:
@@ -648,8 +652,8 @@ class Injector:
             annotation = attrs.get_annotation(param)
             if annotation is not None:
                 resource_name = annotation
-            if resource_name.startswith('::'):
-                resource_name = resource_name[2:]
+            if resource_name.startswith(Namespace.SEP):
+                resource_name = resource_name[len(Namespace.SEP):]
             resource_name = resolve_alias(resource_name, aliases)
             try:
                 dependency_map[param] = self.require(resource_name)
@@ -682,7 +686,7 @@ class Injector:
     def _get_aliases(self, attrs, namespaces = []):
         aliases = attrs.get('aliases', {})
         for alias in aliases.keys():
-            if self.ns_index.sep in alias:
+            if Namespace.SEP in alias:
                 raise InjectionError('Alias name may not contain the namespace separator: "%s"' % alias)
         using_namespaces = namespaces + attrs.get('using-namespaces', [])
         for namespace in using_namespaces:
