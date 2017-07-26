@@ -648,6 +648,8 @@ class Injector:
             annotation = attrs.get_annotation(param)
             if annotation is not None:
                 resource_name = annotation
+            if resource_name.startswith('::'):
+                resource_name = resource_name[2:]
             resource_name = resolve_alias(resource_name, aliases)
             try:
                 dependency_map[param] = self.require(resource_name)
