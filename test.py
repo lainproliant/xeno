@@ -76,8 +76,8 @@ class XenoTests(unittest.TestCase):
 
         injector = Injector(Module())
         with self.assertRaises(MissingDependencyError) as context:
-            injector.require('MissingStuff::name')
-        self.assertTrue(context.exception.name, 'MissingStuff::name')
+            injector.require('MissingStuff/name')
+        self.assertTrue(context.exception.name, 'MissingStuff/name')
         self.assertTrue(context.exception.dep_name, 'last_name')
 
     def test_namespace_internal_scope(self):
@@ -96,7 +96,7 @@ class XenoTests(unittest.TestCase):
                 return '%s %s' % (name, last_name)
 
         injector = Injector(Module())
-        full_name = injector.require('NamesAndStuff::full_name')
+        full_name = injector.require('NamesAndStuff/full_name')
         self.assertTrue(full_name, 'Lain Supe')
 
     def test_illegal_ctor_injection(self):
@@ -318,12 +318,12 @@ class XenoTests(unittest.TestCase):
         @using('A')
         class ModuleC:
             @provide
-            def name(self, first: 'first-name', last: 'B::last-name'):
+            def name(self, first: 'first-name', last: 'B/last-name'):
                 return '%s %s' % (first, last)
 
         class NameContainer:
             @inject
-            def __init__(self, name: 'C::name'):
+            def __init__(self, name: 'C/name'):
                 self.name = name
 
             def get(self):
@@ -373,19 +373,19 @@ class XenoTests(unittest.TestCase):
         self.assertTrue(str(context.exception).startswith('Alias loop detected'))
 
     def test_nested_namespaces(self):
-        @namespace("com::lainproliant::stuff")
+        @namespace("com/lainproliant/stuff")
         class ModuleA:
             @provide
             def name(self):
                 return 'Lain Supe'
 
-        @namespace("com::lainproliant::other_stuff")
+        @namespace("com/lainproliant/other_stuff")
         class ModuleB:
             @provide
-            def address(self, name: 'com::lainproliant::stuff::name'):
+            def address(self, name: 'com/lainproliant/stuff/name'):
                 return '%s: Seattle, WA' % name
 
-        @using("com::lainproliant::other_stuff")
+        @using("com/lainproliant/other_stuff")
         class ModuleC:
             @provide
             @named('address-with-zip')
@@ -397,7 +397,7 @@ class XenoTests(unittest.TestCase):
         self.assertEqual(address, 'Lain Supe: Seattle, WA 98119')
 
     def test_overwrite_namespaced_variable(self):
-        @namespace("com::lainproliant")
+        @namespace("com/lainproliant")
         class ModuleA:
             @provide
             def name(self):
@@ -405,12 +405,12 @@ class XenoTests(unittest.TestCase):
 
         class ModuleB:
             @provide
-            @named("com::lainproliant::name")
+            @named("com/lainproliant/name")
             def name(self):
                 return "Jenna Musgrove"
 
         injector = Injector(ModuleA(), ModuleB())
-        name = injector.require('com::lainproliant::name')
+        name = injector.require('com/lainproliant/name')
         self.assertEqual(name, 'Jenna Musgrove')
 
     def test_dependency_tree(self):
@@ -575,7 +575,7 @@ class XenoTests(unittest.TestCase):
         @namespace('B')
         class ModuleB:
             @provide
-            @named('::A::last_name')
+            @named('/A/last_name')
             def last_name_override(self):
                 return 'Musgrove'
 
@@ -584,14 +584,14 @@ class XenoTests(unittest.TestCase):
                 return '123 Main St.'
 
             @provide
-            def first_name(self, name: '::A::first_name'):
+            def first_name(self, name: '/A/first_name'):
                 return name[::-1]
 
         injector = Injector(ModuleA(), ModuleB())
-        first_name = injector.require('A::first_name')
-        last_name = injector.require('A::last_name')
-        address = injector.require('B::address')
-        weird_name = injector.require('B::first_name')
+        first_name = injector.require('A/first_name')
+        last_name = injector.require('A/last_name')
+        address = injector.require('B/address')
+        weird_name = injector.require('B/first_name')
         self.assertEqual(first_name, 'Lain')
         self.assertEqual(last_name, 'Musgrove')
         self.assertEqual(address, '123 Main St.')
