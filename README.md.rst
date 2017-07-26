@@ -85,6 +85,12 @@ Checkout ``test.py`` in the git repo for more usage examples.
 Change Log
 ----------
 
+Version 1.10: July 25th, 2017
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Allow names prefixed with ``::`` to escape their module's namespace,
+   e.g. ``::top_level_item``
+
 Version 1.9: May 23rd, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

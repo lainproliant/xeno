@@ -561,6 +561,36 @@ class XenoTests(unittest.TestCase):
         self.assertEqual(injector.require('b'), 100)
         self.assertEqual(injector.require('c'), "101")
 
+    def test_namespace_scope_breakout(self):
+        @namespace('A')
+        class ModuleA:
+            @provide
+            def first_name(self):
+                return 'Lain'
+
+            @provide
+            def last_name(self):
+                return 'Supe'
+
+        @namespace('B')
+        class ModuleB:
+            @provide
+            @named('::A::last_name')
+            def last_name_override(self):
+                return 'Musgrove'
+
+            @provide
+            def address(self):
+                return '123 Main St.'
+
+        injector = Injector(ModuleA(), ModuleB())
+        first_name = injector.require('A::first_name')
+        last_name = injector.require('A::last_name')
+        address = injector.require('B::address')
+        self.assertEqual(first_name, 'Lain')
+        self.assertEqual(last_name, 'Musgrove')
+        self.assertEqual(address, '123 Main St.')
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()

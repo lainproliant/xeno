@@ -588,7 +588,11 @@ class Injector:
 
         using_namespaces = []
         name = attrs.get('name')
-        if namespace is not None:
+        # Allow names that begin with the namespace separator
+        # to be scoped outside of the specified namespace.
+        if name.startswith('::'):
+            name = name[2:]
+        elif namespace is not None:
             name = '%s::%s' % (namespace, name)
             using_namespaces.append(namespace)
 
