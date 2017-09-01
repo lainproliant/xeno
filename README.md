@@ -3,7 +3,7 @@
 Xeno is a simple Python dependency injection framework. Use it when you
 need to manage complex inter-object dependencies in a clean way. For the
 merits of dependency injection and IOC, see
-https://en.wikipedia.org/wiki/Dependency\_injection.
+https://en.wikipedia.org/wiki/Dependency_injection.
 
 Xeno should feel pretty familiar to users of Google Guice in Java, as it
 is somewhat similar, although it is less focused on type names and more
