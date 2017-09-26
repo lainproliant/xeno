@@ -80,6 +80,9 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 2.1.0: August 23rd, 2017
+- Allow multiple resource names to be provided to `Injector.get_dependency_graph()`.
+
 ### Version 2.0.0: July 25th, 2017
 - Change the default namespace separator and breakout symbol to '/' (backwards incompatible change)
 

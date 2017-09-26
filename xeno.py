@@ -555,20 +555,25 @@ class Injector:
         if not resource_name in self.resources:
             raise MissingResourceError(resource_name)
         try:
-            return {dep: self.get_dependency_tree(dep) for dep in self.dep_graph.get(resource_name, lambda: ())()}
+            return {dep: self.get_dependency_tree(dep) for dep in self.get_dependencies(resource_name)}
         except MissingResourceError as e:
             raise MissingDependencyError(resource_name, e.name)
 
-    def get_dependency_graph(self, resource_name):
-        if not resource_name in self.resources:
-            raise MissingResourceError(resource_name)
+    def get_dependency_graph(self, resource_name, *other_resource_names):
+        resource_names = [resource_name, *other_resource_names]
+        for name in resource_names:
+            if not name in self.resources:
+                raise MissingResourceError(name)
         try:
-            dep_graph = {resource_name: self.dep_graph.get(resource_name, lambda: ())()}
+            dep_graph = {name: self.get_dependencies(name) for name in resource_names}
             for dep in dep_graph[resource_name]:
                 dep_graph.update(self.get_dependency_graph(dep))
             return dep_graph
         except MissingResourceError as e:
             raise MissingDependencyError(resource_name, e.name)
+
+    def get_dependencies(self, resource_name):
+        return self.dep_graph.get(resource_name, lambda: ())()
 
     def get_resource_attributes(self, resource_name):
         if not resource_name in self.resource_attrs:

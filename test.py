@@ -597,6 +597,33 @@ class XenoTests(unittest.TestCase):
         self.assertEqual(address, '123 Main St.')
         self.assertEqual(weird_name, 'niaL')
 
+    def test_dependencies(self):
+        class ModuleA:
+            @provide
+            def a(self):
+                return 1
+
+            @provide
+            def b(self):
+                return 2
+
+            @provide
+            def c(self):
+                return 3
+
+            @provide
+            def d(self, a, b, c):
+                return 4
+
+            @provide
+            def e(self, b, d):
+                return 5
+
+        injector = Injector(ModuleA())
+        self.assertListEqual([*sorted(injector.get_dependencies('d'))], ['a', 'b', 'c'])
+        self.assertListEqual([*sorted(injector.get_dependencies('e'))], ['b', 'd'])
+        self.assertListEqual([*sorted(injector.get_dependencies('a'))], [])
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()
