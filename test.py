@@ -624,6 +624,24 @@ class XenoTests(unittest.TestCase):
         self.assertListEqual([*sorted(injector.get_dependencies('e'))], ['b', 'd'])
         self.assertListEqual([*sorted(injector.get_dependencies('a'))], [])
 
+    def test_namespace_enumeration(self):
+        @namespace('com/example/cool_tests')
+        class ModuleA:
+            @provide
+            def first_thing(self):
+                return 1
+
+            @provide
+            def second_thing(self):
+                return 2
+
+        injector = Injector(ModuleA())
+        ns = injector.get_namespace('com/example/cool_tests')
+        leaves = ns.enumerate()
+        self.assertEqual(len(leaves), 2)
+        self.assertTrue('cool_tests/first_thing' in leaves)
+        self.assertTrue('cool_tests/second_thing' in leaves)
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()
