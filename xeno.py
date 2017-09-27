@@ -182,28 +182,62 @@ class Namespace:
                 new_ns = Namespace(part)
                 ns.sub_namespaces[part] = new_ns
                 ns = new_ns
-
+    
+    def get_namespace(self, name = None):
+        if name == Namespace.SEP or not name:
+            return self
+        elif name.startswith(Namespace.SEP):
+            return self.get_namespace(name[1:])
+        else:
+            nodes = name.split(Namespace.SEP)
+            if nodes[0] in self.sub_namespaces:
+                return self.sub_namespaces[nodes[0]].get_namespace(Namespace.SEP.join(nodes[1:]))
+            else:
+                return None
+    
     def enumerate(self, name = None):
+        """
+        DEPRECATED
+        This method is deprecated in favor of Namespace.get_leaves() and will soon be removed.
+        """
         if name is None:
             names = set() | {Namespace.join(self.name, leaf) for leaf in self.leaves}
-            for ns_name, namespace in self.sub_namespaces:
-                names | {Namespace.join(ns_name, rollup) for rollup in namespace.enumerate()}
+            for name, ns in self.sub_namespaces.items():
+                names | {Namespace.join(name, rollup) for rollup in ns.enumerate()}
             return names
         else:
-            parts = name.split(Namespace.SEP)
-            if len(parts) == 1:
-                if name in self.leaves:
-                    return set(name)
-                elif name in self.sub_namespaces:
-                    return set(self.sub_namespaces[name].enumerate())
-                else:
-                    raise UndefinedNameError(name)
+            if name == Namespace.SEP:
+                return set(self.leaves)
             else:
-                if parts[0] in self.sub_namespaces:
-                    return [Namespace.join(parts[0], x)
-                            for x in self.sub_namespaces[parts[0]].enumerate(Namespace.join(*parts[1:]))]
+                parts = name.split(Namespace.SEP)
+                if len(parts) == 1:
+                    if name in self.leaves:
+                        return set(name)
+                    elif name in self.sub_namespaces:
+                        return set(self.sub_namespaces[name].enumerate())
+                    else:
+                        raise UndefinedNameError(name)
                 else:
-                    raise UnknownNamespaceError(parts[0])
+                    if parts[0] in self.sub_namespaces:
+                        return [Namespace.join(parts[0], x)
+                                for x in self.sub_namespaces[parts[0]].enumerate(Namespace.join(*parts[1:]))]
+                    else:
+                        raise UnknownNamespaceError(parts[0])
+
+    def get_leaves(self, recursive = False, prefix = ''):
+        if not recursive:
+            return list(self.leaves)
+        else:
+            if self.name == Namespace.ROOT:
+                prefix = ''
+            else:
+                prefix += self.name + Namespace.SEP
+            
+            leaves = []
+            leaves.extend([prefix + x for x in self.leaves])
+            for ns in self.sub_namespaces.values():
+                leaves.extend(ns.get_leaves(True, prefix))
+            return leaves
 
 #--------------------------------------------------------------------
 def singleton(f):
@@ -442,6 +476,12 @@ class Injector:
             self.add_module(module, skip_cycle_check = True)
         self._check_for_cycles()
 
+    def get_namespace(self, name = None):
+        if name is None or name == Namespace.SEP:
+            return self.ns_index
+        else:
+            return self.ns_index.get_namespace(name)
+
     def add_module(self, module, skip_cycle_check = False):
         """
         Add a module to the injector.  The module is scanned for @provider
@@ -550,7 +590,7 @@ class Injector:
         Determine if this Injector has been provided with the named resource.
         """
         return name in self.resources
-
+    
     def get_dependency_tree(self, resource_name):
         if not resource_name in self.resources:
             raise MissingResourceError(resource_name)

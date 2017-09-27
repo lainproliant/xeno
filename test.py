@@ -624,6 +624,61 @@ class XenoTests(unittest.TestCase):
         self.assertListEqual([*sorted(injector.get_dependencies('e'))], ['b', 'd'])
         self.assertListEqual([*sorted(injector.get_dependencies('a'))], [])
 
+    def test_namespace_enumeration(self):
+        @namespace('com/example/cool_tests')
+        class ModuleA:
+            @provide
+            def first_thing(self):
+                return 1
+
+            @provide
+            def second_thing(self):
+                return 2
+
+        injector = Injector(ModuleA())
+        ns = injector.get_namespace('com/example/cool_tests')
+        leaves = ns.enumerate()
+        self.assertEqual(len(leaves), 2)
+        self.assertTrue('cool_tests/first_thing' in leaves)
+        self.assertTrue('cool_tests/second_thing' in leaves)
+
+    def test_namespace_get_leaves(self):
+        @namespace('com/example/core')
+        class Core:
+            @provide
+            def first_thing(self):
+                return 1
+
+            @provide
+            def second_thing(self):
+                return 2
+
+        @namespace('com/example/impl')
+        class Impl:
+            @provide
+            def third_thing(self):
+                return 3
+
+            @provide
+            def fourth_thing(self):
+                return 4
+
+        injector = Injector(Core(), Impl())
+        ns = injector.get_namespace()
+        recursive_list = ns.get_leaves(recursive = True)
+        core_ns = ns.get_namespace('com/example/core')
+        impl_ns = ns.get_namespace('com/example/impl')
+        core_list = core_ns.get_leaves()
+        impl_list = impl_ns.get_leaves()
+
+        self.assertEqual(len(recursive_list), 4)
+        self.assertEqual(len(core_list), 2)
+        self.assertEqual(len(impl_list), 2)
+        self.assertTrue('first_thing' in core_list)
+        self.assertTrue('second_thing' in core_list)
+        self.assertTrue('third_thing' in impl_list)
+        self.assertTrue('fourth_thing' in impl_list)
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()

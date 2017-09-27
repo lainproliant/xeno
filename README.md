@@ -80,6 +80,9 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 2.2.0: September 19, 2017
+- Expose the Injector's Namespace object via `Injector.get_namespace()`.  This is useful for users who want to list the contents of namespaces.
+
 ### Version 2.1.0: August 23rd, 2017
 - Allow multiple resource names to be provided to `Injector.get_dependency_graph()`.
 
