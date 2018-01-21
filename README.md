@@ -80,6 +80,9 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 2.3.0: January 21, 2018
+- Added support for asyncio-based concurrency and async provider coroutines with per-injector event loops (`injector.loop`).
+
 ### Version 2.2.0: September 19, 2017
 - Expose the Injector's Namespace object via `Injector.get_namespace()`.  This is useful for users who want to list the contents of namespaces.
 

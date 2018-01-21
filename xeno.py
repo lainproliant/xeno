@@ -6,6 +6,7 @@
 #
 # Released under a 3-clause BSD license, see LICENSE for more info.
 #--------------------------------------------------------------------
+import asyncio
 import collections
 import inspect
 
@@ -136,7 +137,7 @@ class MethodAttributes(Attributes):
 class Namespace:
     ROOT = '@root'
     SEP = '/'
-    
+
     @staticmethod
     def join(*args):
         return Namespace.SEP.join(args)
@@ -182,7 +183,7 @@ class Namespace:
                 new_ns = Namespace(part)
                 ns.sub_namespaces[part] = new_ns
                 ns = new_ns
-    
+
     def get_namespace(self, name = None):
         if name == Namespace.SEP or not name:
             return self
@@ -194,7 +195,7 @@ class Namespace:
                 return self.sub_namespaces[nodes[0]].get_namespace(Namespace.SEP.join(nodes[1:]))
             else:
                 return None
-    
+
     def enumerate(self, name = None):
         """
         DEPRECATED
@@ -232,12 +233,32 @@ class Namespace:
                 prefix = ''
             else:
                 prefix += self.name + Namespace.SEP
-            
+
             leaves = []
             leaves.extend([prefix + x for x in self.leaves])
             for ns in self.sub_namespaces.values():
                 leaves.extend(ns.get_leaves(True, prefix))
             return leaves
+
+#--------------------------------------------------------------------
+async def coro_map(key, coro):
+    """
+    Wraps a coroutine so that when executed, the coroutine result
+    and the mapped value are provided.  Useful for gathering results
+    from a map of coroutines.
+    """
+    return key, await coro
+
+#--------------------------------------------------------------------
+async def coro_wrap(f, *args, **kwargs):
+    """
+    Wraps a normal function in a coroutine.  If the given function
+    is already a coroutine function, we simply yield from it.
+    """
+    if not asyncio.iscoroutinefunction(f):
+        return f(*args, **kwargs)
+    else:
+        return await f(*args, **kwargs)
 
 #--------------------------------------------------------------------
 def singleton(f):
@@ -465,6 +486,7 @@ class Injector:
                   More modules can be added later by calling
                   Injector.add_module().
         """
+        self.loop = asyncio.new_event_loop()
         self.resources = {'injector': lambda: self}
         self.singletons = {}
         self.dep_graph = {}
@@ -475,6 +497,9 @@ class Injector:
         for module in modules:
             self.add_module(module, skip_cycle_check = True)
         self._check_for_cycles()
+
+    def __del__(self):
+        self.loop.close()
 
     def get_namespace(self, name = None):
         if name is None or name == Namespace.SEP:
@@ -528,31 +553,60 @@ class Injector:
         with these parameters in the constructor, then mark one or more
         methods with @inject and pass the instance to Injector.inject().
         """
+        return self.loop.run_until_complete(self.create_async(class_))
+
+    async def create_async(self, class_):
+        """
+        Create an instance of the specified class.  The class' constructor
+        must follow the rules for @inject methods, such that all of its
+        parameters refer to injectable resources or are optional.
+
+        This async method is meant to be awaited from another coroutine.
+
+        If the object needs to be constructed with objects not from the
+        Injector, do not use this method.  Instead, instantiate the object
+        with these parameters in the constructor, then mark one or more
+        methods with @inject and pass the instance to Injector.inject().
+        """
         try:
-            dependency_map = self._resolve_dependencies(class_.__init__, unbound_ctor = True)
+            dependency_map = await self._resolve_dependencies(class_.__init__, unbound_ctor = True)
             attrs = MethodAttributes.for_method(class_.__init__)
             dependency_map = self._invoke_injection_interceptors(attrs, dependency_map)
         except MethodInjectionError as e:
             raise ClassInjectionError(class_, e.name)
 
         instance = class_(**dependency_map)
-        self._inject_instance(instance)
+        await self._inject_instance(instance)
         return instance
 
     def inject(self, obj, aliases = {}, namespace = ''):
         """
         Inject a method or object instance with resources from this Injector.
 
-        obj:A method or object instance.  If this is a method, all named
+        obj: A method or object instance.  If this is a method, all named
+             parameters are injected from the Injector.  If this is an instance,
+             its methods are scanned for injection points and these methods
+             are all invoked with resources from the Injector.
+        aliases: An optional map from dependency alias to real dependency name.
+        """
+        return self.loop.run_until_complete(self.inject_async(obj, aliases, namespace))
+
+    async def inject_async(self, obj, aliases = {}, namespace = ''):
+        """
+        Inject a method or object instance with resources from this Injector.
+
+        This async method is meant to be awaited from another coroutine.
+
+        obj: A method or object instance.  If this is a method, all named
              parameters are injected from the Injector.  If this is an instance,
              its methods are scanned for injection points and these methods
              are all invoked with resources from the Injector.
         aliases: An optional map from dependency alias to real dependency name.
         """
         if inspect.isfunction(obj) or inspect.ismethod(obj):
-            return self._inject_method(obj, aliases, namespace)
+            return await self._inject_method(obj, aliases, namespace)
         else:
-            return self._inject_instance(obj, aliases, namespace)
+            return await self._inject_instance(obj, aliases, namespace)
 
     def require(self, name, method = None):
         """
@@ -561,16 +615,24 @@ class Injector:
 
         Optionally, a method can be specified.  This indicates the method that
         requires the resource for injection, and causes this method to throw
-        MethodInjectionError instead of InjectionError if hte resource was
+        MethodInjectionError instead of InjectionError if the resource was
         not provided.
         """
-        if not name in self.resources:
-            if method is not None:
-                raise MethodInjectionError(method, name, 'Resource was not provided.')
-            else:
-                raise MissingResourceError(name)
-        else:
-            return self.resources[name]()
+        return self.loop.run_until_complete(self.require_async(name, method))
+
+    async def require_async(self, name, method = None):
+        """
+        Require a named resource from this Injector.  If it can't be provided,
+        an InjectionError is raised.
+
+        This async method is meant to be awaited from another coroutine.
+
+        Optionally, a method can be specified.  This indicates the method that
+        requires the resource for injection, and causes this method to throw
+        MethodInjectionError instead of InjectionError if the resource was
+        not provided.
+        """
+        return await self._require_coro(name, method)
 
     def provide(self, name, value, is_singleton = False, namespace = None):
         if inspect.ismethod(value) or inspect.isfunction(value):
@@ -590,7 +652,7 @@ class Injector:
         Determine if this Injector has been provided with the named resource.
         """
         return name in self.resources
-    
+
     def get_dependency_tree(self, resource_name):
         if not resource_name in self.resources:
             raise MissingResourceError(resource_name)
@@ -652,9 +714,9 @@ class Injector:
         injected_method = self.inject(bound_method, aliases, namespace)
 
         if attrs.check('singleton'):
-            def wrapper():
+            async def wrapper():
                 if not name in self.singletons:
-                    singleton = injected_method()
+                    singleton = await injected_method()
                     self.singletons[name] = singleton
                     return singleton
                 else:
@@ -681,7 +743,7 @@ class Injector:
         for resource in self.dep_graph.keys():
             visit(resource)
 
-    def _resolve_dependencies(self, f, unbound_ctor = False, aliases = {}, namespace = ''):
+    async def _resolve_dependencies(self, f, unbound_ctor = False, aliases = {}, namespace = ''):
         params, default_set = get_injection_params(f, unbound_ctor = unbound_ctor)
         attrs = MethodAttributes.for_method(f)
         dependency_map = {}
@@ -690,37 +752,40 @@ class Injector:
             full_name = Namespace.join(namespace, full_name)
             aliases = {**aliases, **self._get_aliases(attrs, [namespace])}
 
-        for param in params:
-            if param in default_set and not self.has(param):
-                continue
-            resource_name = param
-            annotation = attrs.get_annotation(param)
-            if annotation is not None:
-                resource_name = annotation
-            if resource_name.startswith(Namespace.SEP):
-                resource_name = resource_name[len(Namespace.SEP):]
-            resource_name = resolve_alias(resource_name, aliases)
-            try:
-                dependency_map[param] = self.require(resource_name)
-            except MissingResourceError as e:
-                raise MissingDependencyError(full_name, e.name) from e
+        try:
+            resource_coro_map = {}
+            for param in params:
+                if param in default_set and not self.has(param):
+                    continue
+                resource_name = param
+                annotation = attrs.get_annotation(param)
+                if annotation is not None:
+                    resource_name = annotation
+                if resource_name.startswith(Namespace.SEP):
+                    resource_name = resource_name[len(Namespace.SEP):]
+                resource_name = resolve_alias(resource_name, aliases)
+                resource_coro_map[param] = self._require_coro(resource_name)
+            dependency_map = dict(await asyncio.gather(*(coro_map(k, c) for k, c in resource_coro_map.items())))
+        except MissingResourceError as e:
+            raise MissingDependencyError(full_name, e.name) from e
         return dependency_map
 
-    def _inject_instance(self, instance, aliases = {}, namespace = ''):
+    async def _inject_instance(self, instance, aliases = {}, namespace = ''):
         class_attributes = ClassAttributes.for_class(instance.__class__)
         aliases = {**aliases, **class_attributes.get('aliases', {})}
         for attrs, injection_point in get_injection_points(instance):
-            self.inject(injection_point, aliases, namespace)()
+            injected_method = await self.inject_async(injection_point, aliases, namespace)
+            await injected_method()
         return instance
 
-    def _inject_method(self, method, aliases_in = {}, namespace = ''):
-        def wrapper():
+    async def _inject_method(self, method, aliases_in = {}, namespace = ''):
+        async def wrapper():
             aliases = {**aliases_in}
             attrs = MethodAttributes.for_method(method)
             aliases = {**aliases, **attrs.get('aliases', {})}
-            dependency_map = self._resolve_dependencies(method, aliases = aliases, namespace = namespace)
+            dependency_map = await self._resolve_dependencies(method, aliases = aliases, namespace = namespace)
             depencency_map = self._invoke_injection_interceptors(attrs, dependency_map)
-            return method(**dependency_map)
+            return await coro_wrap(method, **dependency_map)
         return wrapper
 
     def _invoke_injection_interceptors(self, attrs, dependency_map):
@@ -737,4 +802,17 @@ class Injector:
         for namespace in using_namespaces:
             aliases = {**aliases, **{Namespace.leaf_name(name): name for name in self.ns_index.enumerate(namespace)}}
         return aliases
+
+    async def _require_coro(self, name, method = None):
+        """
+        For internal use only.  Used to tie together resources needed
+        by other resources in this injector.
+        """
+        if not name in self.resources:
+            if method is not None:
+                raise MethodInjectionError(method, name, 'Resource was not provided.')
+            else:
+                raise MissingResourceError(name)
+        else:
+            return await coro_wrap(self.resources[name])
 

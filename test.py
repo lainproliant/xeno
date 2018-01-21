@@ -506,7 +506,7 @@ class XenoTests(unittest.TestCase):
             @singleton
             def a(self):
                 return 1
-            
+
             @provide
             def b(self):
                 return 0
@@ -656,7 +656,7 @@ class XenoTests(unittest.TestCase):
         @namespace('com/example/impl')
         class Impl:
             @provide
-            def third_thing(self):
+            def third_thing(self, injector):
                 return 3
 
             @provide
@@ -678,6 +678,38 @@ class XenoTests(unittest.TestCase):
         self.assertTrue('second_thing' in core_list)
         self.assertTrue('third_thing' in impl_list)
         self.assertTrue('fourth_thing' in impl_list)
+
+    def test_implicit_async(self):
+        from timeit import default_timer as timer
+        import time
+        SLEEP = 1
+
+        class AsyncWaiting:
+            @provide
+            def wait_all(self, first_wait, second_wait, third_wait):
+                return first_wait + second_wait + third_wait
+
+            @provide
+            async def first_wait(self, injector):
+                await asyncio.sleep(SLEEP, injector.loop)
+                return 1
+
+            @provide
+            async def second_wait(self, injector):
+                await asyncio.sleep(SLEEP, injector.loop)
+                return 1
+
+            @provide
+            async def third_wait(self, injector):
+                await asyncio.sleep(SLEEP, injector.loop)
+                return 1
+
+        injector = Injector(AsyncWaiting())
+        t0 = timer()
+        n = injector.require('wait_all')
+        t1 = timer()
+        self.assertTrue(t1 - t0 < SLEEP * 2)
+        self.assertEqual(n, 3)
 
 #--------------------------------------------------------------------
 if __name__ == '__main__':

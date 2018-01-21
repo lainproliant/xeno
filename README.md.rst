@@ -4,7 +4,7 @@ Xeno: The Python dependency injector from outer space.
 Xeno is a simple Python dependency injection framework. Use it when you
 need to manage complex inter-object dependencies in a clean way. For the
 merits of dependency injection and IOC, see
-https://en.wikipedia.org/wiki/Dependency\_injection.
+https://en.wikipedia.org/wiki/Dependency_injection.
 
 Xeno should feel pretty familiar to users of Google Guice in Java, as it
 is somewhat similar, although it is less focused on type names and more
@@ -35,7 +35,7 @@ annotation. This annotation tells the ``Injector`` that this method
 provides a named resource, the same name as the method marked with
 ``@provider``. These methods should either take no parameters (other
 than ``self``), or take named parameters which refer to other resources
-by name, i.e. the providers can also be injected with other resources in
+by name, i.e. the providers can also be injected with other resources in
 order to build a dependency chain.
 
 Once you have an ``Injector`` full of resources, you can use it to
@@ -85,10 +85,16 @@ Checkout ``test.py`` in the git repo for more usage examples.
 Change Log
 ----------
 
+Version 2.3.0: January 21, 2018
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Added support for asyncio-based concurrency and async provider
+   coroutines with per-injector event loops (``injector.loop``).
+
 Version 2.2.0: September 19, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Expose the Injector's Namespace object via
+-  Expose the Injector’s Namespace object via
    ``Injector.get_namespace()``. This is useful for users who want to
    list the contents of namespaces.
 
@@ -101,7 +107,7 @@ Version 2.1.0: August 23rd, 2017
 Version 2.0.0: July 25th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Change the default namespace separator and breakout symbol to '/'
+-  Change the default namespace separator and breakout symbol to ‘/’
    (backwards incompatible change)
 
 Code using the old namespace separator can be made to work by overriding
@@ -115,7 +121,7 @@ the value of xeno.Namespace.SEP:
 Version 1.10: July 25th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Allow names prefixed with ``::`` to escape their module's namespace,
+-  Allow names prefixed with ``::`` to escape their module’s namespace,
    e.g. ``::top_level_item``
 
 Version 1.9: May 23rd, 2017
@@ -137,19 +143,21 @@ Version 1.7: May 16th, 2017
 -  Major update, adding support for namespaces, aliases, and inline
    resource parameter aliases. See the unit tests in test.py for
    examples.
--  Added ``@namespace('Name')`` decorator for modules to specify that
-   all resources defined in the module should be scoped within 'Name::'.
--  Added ``@name('alt-name')`` to allow resources to be named something
-   other than the name of the function that defines them.
--  Added ``@alias('alt-name', 'name')`` to allow a resource to be
-   renamed within either the scope of a single resource or a whole
-   module.
--  Added ``@using('NamespaceName')`` to allow the contents of the given
-   namespace to be automatically aliases into either the scope of a
-   single resource or a whole module.
--  Added support for resource function annotations via PEP 3107 to allow
-   inline aliases, e.g.
-   ``def my_resource(name: 'Name::something-important'):``
+
+   -  Added ``@namespace('Name')`` decorator for modules to specify that
+      all resources defined in the module should be scoped within
+      ‘Name::’.
+   -  Added ``@name('alt-name')`` to allow resources to be named
+      something other than the name of the function that defines them.
+   -  Added ``@alias('alt-name', 'name')`` to allow a resource to be
+      renamed within either the scope of a single resource or a whole
+      module.
+   -  Added ``@using('NamespaceName')`` to allow the contents of the
+      given namespace to be automatically aliases into either the scope
+      of a single resource or a whole module.
+   -  Added support for resource function annotations via PEP 3107 to
+      allow inline aliases, e.g.
+      ``def my_resource(name: 'Name::something-important'):``
 
 Version 1.6: April 26th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -163,7 +171,7 @@ Version 1.5: April 26th, 2017
 -  Added injection interceptors
 -  Refactored method tagging to use ``xeno.MethodAttributes`` instead of
    named object attributes to make attribute tagging more flexible and
-   usable by the outside world, e.g. for the new injectors.
+   usable by the outside world, e.g. for the new injectors.
 
 Version 1.4: August 30th, 2016
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -173,4 +181,4 @@ Version 1.4: August 30th, 2016
 Version 1.3: August 29th, 2016
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Have the injector offer itself as a named resource named 'injector'.
+-  Have the injector offer itself as a named resource named ‘injector’.
