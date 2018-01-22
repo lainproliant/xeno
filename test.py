@@ -686,7 +686,15 @@ class XenoTests(unittest.TestCase):
 
         class AsyncWaiting:
             @provide
-            def wait_all(self, first_wait, second_wait, third_wait):
+            def wait_all(self, wait_A, wait_B):
+                return wait_A + wait_B
+
+            @provide
+            def wait_B(self, fourth_wait, fifth_wait, sixth_wait):
+                return fourth_wait + fifth_wait + sixth_wait
+
+            @provide
+            def wait_A(self, first_wait, second_wait, third_wait):
                 return first_wait + second_wait + third_wait
 
             @provide
@@ -704,12 +712,27 @@ class XenoTests(unittest.TestCase):
                 await asyncio.sleep(SLEEP, injector.loop)
                 return 1
 
+            @provide
+            async def fourth_wait(self, injector):
+                await asyncio.sleep(SLEEP, injector.loop)
+                return 1
+
+            @provide
+            async def fifth_wait(self, injector):
+                await asyncio.sleep(SLEEP, injector.loop)
+                return 1
+
+            @provide
+            async def sixth_wait(self, injector):
+                await asyncio.sleep(SLEEP, injector.loop)
+                return 1
+
         injector = Injector(AsyncWaiting())
         t0 = timer()
         n = injector.require('wait_all')
         t1 = timer()
         self.assertTrue(t1 - t0 < SLEEP * 2)
-        self.assertEqual(n, 3)
+        self.assertEqual(n, 6)
 
 #--------------------------------------------------------------------
 if __name__ == '__main__':
