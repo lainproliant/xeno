@@ -196,35 +196,6 @@ class Namespace:
             else:
                 return None
 
-    def enumerate(self, name = None):
-        """
-        DEPRECATED
-        This method is deprecated in favor of Namespace.get_leaves() and will soon be removed.
-        """
-        if name is None:
-            names = set() | {Namespace.join(self.name, leaf) for leaf in self.leaves}
-            for name, ns in self.sub_namespaces.items():
-                names | {Namespace.join(name, rollup) for rollup in ns.enumerate()}
-            return names
-        else:
-            if name == Namespace.SEP:
-                return set(self.leaves)
-            else:
-                parts = name.split(Namespace.SEP)
-                if len(parts) == 1:
-                    if name in self.leaves:
-                        return set(name)
-                    elif name in self.sub_namespaces:
-                        return set(self.sub_namespaces[name].enumerate())
-                    else:
-                        raise UndefinedNameError(name)
-                else:
-                    if parts[0] in self.sub_namespaces:
-                        return [Namespace.join(parts[0], x)
-                                for x in self.sub_namespaces[parts[0]].enumerate(Namespace.join(*parts[1:]))]
-                    else:
-                        raise UnknownNamespaceError(parts[0])
-
     def get_leaves(self, recursive = False, prefix = ''):
         if not recursive:
             return list(self.leaves)
@@ -800,7 +771,7 @@ class Injector:
                 raise InjectionError('Alias name may not contain the namespace separator: "%s"' % alias)
         using_namespaces = namespaces + attrs.get('using-namespaces', [])
         for namespace in using_namespaces:
-            aliases = {**aliases, **{Namespace.leaf_name(name): name for name in self.ns_index.enumerate(namespace)}}
+            aliases = {**aliases, **{Namespace.leaf_name(name): name for name in self.ns_index.get_leaves(recursive = True)}}
         return aliases
 
     async def _require_coro(self, name, method = None):

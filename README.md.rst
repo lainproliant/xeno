@@ -85,6 +85,12 @@ Checkout ``test.py`` in the git repo for more usage examples.
 Change Log
 ----------
 
+Version 2.4.0: January 21, 2018
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Dropped support for deprecated ``Namespace.enumerate()`` in favor of
+   ``Namespace.get_leaves()``.
+
 Version 2.3.0: January 21, 2018
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
