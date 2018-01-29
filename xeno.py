@@ -457,7 +457,7 @@ class Injector:
                   More modules can be added later by calling
                   Injector.add_module().
         """
-        self.loop = asyncio.new_event_loop()
+        self.loop = asyncio.get_event_loop()
         self.resources = {'injector': lambda: self}
         self.singletons = {}
         self.dep_graph = {}
@@ -468,9 +468,6 @@ class Injector:
         for module in modules:
             self.add_module(module, skip_cycle_check = True)
         self._check_for_cycles()
-
-    def __del__(self):
-        self.loop.close()
 
     def get_namespace(self, name = None):
         if name is None or name == Namespace.SEP:
@@ -736,7 +733,7 @@ class Injector:
                     resource_name = resource_name[len(Namespace.SEP):]
                 resource_name = resolve_alias(resource_name, aliases)
                 resource_coro_map[param] = self._require_coro(resource_name)
-            dependency_map = dict(await asyncio.gather(*(coro_map(k, c) for k, c in resource_coro_map.items())))
+            dependency_map = dict(await asyncio.gather(*(coro_map(k, c) for k, c in resource_coro_map.items()), loop = self.loop))
         except MissingResourceError as e:
             raise MissingDependencyError(full_name, e.name) from e
         return dependency_map
