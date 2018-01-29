@@ -6,6 +6,35 @@
 #
 # Released under a 3-clause BSD license, see LICENSE for more info.
 #--------------------------------------------------------------------
+__all__ = ['InjectionError',
+           'MissingResourceError',
+           'MissingDependencyError',
+           'MethodInjectionError',
+           'ClassInjectionError',
+           'CircularDependencyError',
+           'UndefinedNameError',
+           'UnknownNamespaceError',
+           'InvalidResourceError',
+           'ClassAttributes',
+           'MethodAttributes',
+           'Namespace',
+           'async_map',
+           'async_wrap',
+           'singleton',
+           'provide',
+           'inject',
+           'named',
+           'alias',
+           'namespace',
+           'const',
+           'using',
+           'scan_methods',
+           'get_injection_points',
+           'get_providers',
+           'get_injection_params',
+           'Injector']
+
+#--------------------------------------------------------------------
 import asyncio
 import collections
 import inspect
@@ -212,7 +241,7 @@ class Namespace:
             return leaves
 
 #--------------------------------------------------------------------
-async def coro_map(key, coro):
+async def async_map(key, coro):
     """
     Wraps a coroutine so that when executed, the coroutine result
     and the mapped value are provided.  Useful for gathering results
@@ -221,7 +250,7 @@ async def coro_map(key, coro):
     return key, await coro
 
 #--------------------------------------------------------------------
-async def coro_wrap(f, *args, **kwargs):
+async def async_wrap(f, *args, **kwargs):
     """
     Wraps a normal function in a coroutine.  If the given function
     is already a coroutine function, we simply yield from it.
@@ -721,7 +750,7 @@ class Injector:
             aliases = {**aliases, **self._get_aliases(attrs, [namespace])}
 
         try:
-            resource_coro_map = {}
+            resource_async_map = {}
             for param in params:
                 if param in default_set and not self.has(param):
                     continue
@@ -732,8 +761,8 @@ class Injector:
                 if resource_name.startswith(Namespace.SEP):
                     resource_name = resource_name[len(Namespace.SEP):]
                 resource_name = resolve_alias(resource_name, aliases)
-                resource_coro_map[param] = self._require_coro(resource_name)
-            dependency_map = dict(await asyncio.gather(*(coro_map(k, c) for k, c in resource_coro_map.items()), loop = self.loop))
+                resource_async_map[param] = self._require_coro(resource_name)
+            dependency_map = dict(await asyncio.gather(*(async_map(k, c) for k, c in resource_async_map.items()), loop = self.loop))
         except MissingResourceError as e:
             raise MissingDependencyError(full_name, e.name) from e
         return dependency_map
@@ -753,7 +782,7 @@ class Injector:
             aliases = {**aliases, **attrs.get('aliases', {})}
             dependency_map = await self._resolve_dependencies(method, aliases = aliases, namespace = namespace)
             depencency_map = self._invoke_injection_interceptors(attrs, dependency_map)
-            return await coro_wrap(method, **dependency_map)
+            return await async_wrap(method, **dependency_map)
         return wrapper
 
     def _invoke_injection_interceptors(self, attrs, dependency_map):
@@ -782,5 +811,5 @@ class Injector:
             else:
                 raise MissingResourceError(name)
         else:
-            return await coro_wrap(self.resources[name])
+            return await async_wrap(self.resources[name])
 
