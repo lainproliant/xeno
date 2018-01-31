@@ -80,6 +80,12 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 2.4.1: January 30, 2018
+- Added `Injector.scan_resources()` to allow users to scan for resource names with the given attributes.
+- Added `Attributes.merge()` to assist with passing attributes down to functions which are wrapped in a decorator.
+- Added `MethodAttributes.wraps()` static decorator to summarize a common use case of attribute merging.
+- Added `MethodAttributes.add()` as a simple static decorator to add attribute values to a method's attributes.
+
 ### Version 2.4.0: January 21, 2018
 - Dropped support for deprecated `Namespace.enumerate()` in favor of `Namespace.get_leaves()`.
 

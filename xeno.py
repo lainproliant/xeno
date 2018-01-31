@@ -136,6 +136,10 @@ class Attributes:
     def check(self, attr):
         return True if self.get(attr, None) else False
 
+    def merge(self, attr):
+        self.attr_map.update(attr.attr_map)
+        return self
+
 #--------------------------------------------------------------------
 class ClassAttributes(Attributes):
     @staticmethod
@@ -152,6 +156,22 @@ class MethodAttributes(Attributes):
     @staticmethod
     def for_method(f, create = True, write = False):
         return Attributes.for_object(f, create, write, factory = lambda x: MethodAttributes(x))
+
+    @staticmethod
+    def wraps(f1):
+        def decorator(f2):
+            attr1 = MethodAttributes.for_method(f1)
+            MethodAttributes.for_method(f2, write = True).merge(attr1)
+            return f2
+        return decorator
+
+    @staticmethod
+    def add(name, value = True):
+        def decorator(f):
+            attrs = MethodAttributes.for_method(f, write = True)
+            attrs.put(name, value)
+            return f
+        return decorator
 
     def __init__(self, f):
         super().__init__()
@@ -610,6 +630,8 @@ class Injector:
         Require a named resource from this Injector.  If it can't be provided,
         an InjectionError is raised.
 
+        This method should only be called from outside of the asyncio event loop.
+
         Optionally, a method can be specified.  This indicates the method that
         requires the resource for injection, and causes this method to throw
         MethodInjectionError instead of InjectionError if the resource was
@@ -678,6 +700,11 @@ class Injector:
         if not resource_name in self.resource_attrs:
             raise MissingResourceError(resource_name)
         return self.resource_attrs[resource_name]
+
+    def scan_resources(self, resource_name, filter_f):
+        for key, value in self.resource_attrs.items():
+            if filter_f(key, value):
+                yield key, value
 
     def unbind_singleton(self, resource_name = None, unbind_all = False):
         if unbind_all:
