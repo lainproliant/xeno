@@ -701,7 +701,7 @@ class Injector:
             raise MissingResourceError(resource_name)
         return self.resource_attrs[resource_name]
 
-    def scan_resources(self, resource_name, filter_f):
+    def scan_resources(self, filter_f):
         for key, value in self.resource_attrs.items():
             if filter_f(key, value):
                 yield key, value
