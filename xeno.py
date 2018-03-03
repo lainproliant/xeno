@@ -653,18 +653,21 @@ class Injector:
         """
         return await self._require_coro(name, method)
 
-    def provide(self, name, value, is_singleton = False, namespace = None):
+    async def provide_async(self, name, value, is_singleton = False, namespace = None):
         if inspect.ismethod(value) or inspect.isfunction(value):
             if is_singleton:
                 value = singleton(value)
-            self._bind_resource(resource, namespace = namespace)
+            await self._bind_resource_async(resource, namespace = namespace)
         else:
             @named(name)
             def wrapper():
                 return value
             if is_singleton:
                 wrapper = singleton(wrapper)
-            self._bind_resource(wrapper, namespace = namespace)
+            await self._bind_resource_async(wrapper, namespace = namespace)
+
+    def provide(self, name, value, is_singleton = False, namespace = None):
+        return self.loop.run_until_complete(self.provide_async(name, value, is_singleton, namespace))
 
     def has(self, name):
         """
@@ -716,8 +719,8 @@ class Injector:
                 raise InvalidResourceError('Resource "%s" is not a singleton.' % resource_name)
             if resource_name in self.singletons:
                 del self.singletons[resource_name]
-
-    def _bind_resource(self, bound_method, module_aliases = {}, namespace = None):
+    
+    async def _bind_resource_async(self, bound_method, module_aliases = {}, namespace = None):
         params, _ = get_injection_params(bound_method)
         attrs = MethodAttributes.for_method(bound_method)
 
@@ -735,7 +738,7 @@ class Injector:
             return {**(self._get_aliases(attrs, using_namespaces) or {}), **module_aliases}
 
         aliases = get_aliases()
-        injected_method = self.inject(bound_method, aliases, namespace)
+        injected_method = await self.inject_async(bound_method, aliases, namespace)
 
         if attrs.check('singleton'):
             async def wrapper():
@@ -753,6 +756,9 @@ class Injector:
         self.resources[name] = resource
         self.resource_attrs[name] = attrs
         self.dep_graph[name] = lambda: [resolve_alias(x, get_aliases()) for x in params]
+
+    def _bind_resource(self, bound_method, module_aliases = {}, namespace = None):
+        return self.loop.run_until_complete(self._bind_resource_async(bound_method, module_aliases, namespace))
 
     def _check_for_cycles(self):
         visited = set()

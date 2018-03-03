@@ -80,6 +80,12 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 2.5.0: March 2, 2018
+- Added `Injector.provide_async()`.  Note that resource are always run within an
+  event loop and should not use `inject()`, `provide()`, or `require()`
+  directly, instead they should use `inject_async()`, `provide_async()`, and
+  `require_async()` to dynamically modify resources.
+
 ### Version 2.4.1: January 30, 2018
 - Added `Injector.scan_resources()` to allow users to scan for resource names with the given attributes.
 - Added `Attributes.merge()` to assist with passing attributes down to functions which are wrapped in a decorator.
