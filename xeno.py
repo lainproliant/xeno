@@ -473,14 +473,24 @@ def get_injection_params(f, unbound_ctor = False):
     return injection_param_names, default_param_set
 
 #--------------------------------------------------------------------
-def resolve_alias(name, aliases):
-    visited = set()
-    while name in aliases:
+def resolve_alias(name, aliases, visited = None):
+    if visited is None:
+        visited = set()
+
+    if name in aliases:
         if name in visited:
             raise InjectionError('Alias loop detected: %s -> %s' % (name, ','.join(visited)))
-        name = aliases[name]
         visited.add(name)
+        name = resolve_alias(aliases[name], aliases, set(visited))
     return name
+
+#--------------------------------------------------------------------
+def resolve_annotation_alias(name, attrs):
+    annotation = attrs.get_annotation(name)
+    if annotation is not None:
+        if annotation.startswith(Namespace.SEP):
+            annotation = annotation[len(Namespace.SEP):]
+    return annotation
 
 #--------------------------------------------------------------------
 class Injector:
@@ -719,7 +729,7 @@ class Injector:
                 raise InvalidResourceError('Resource "%s" is not a singleton.' % resource_name)
             if resource_name in self.singletons:
                 del self.singletons[resource_name]
-    
+
     async def _bind_resource_async(self, bound_method, module_aliases = {}, namespace = None):
         params, _ = get_injection_params(bound_method)
         attrs = MethodAttributes.for_method(bound_method)
@@ -734,10 +744,14 @@ class Injector:
             name = Namespace.join(namespace, name)
             using_namespaces.append(namespace)
 
-        def get_aliases():
-            return {**(self._get_aliases(attrs, using_namespaces) or {}), **module_aliases}
+        def get_aliases(name):
+            annotation_alias_target = resolve_annotation_alias(name, attrs)
+            aliases = {**(self._get_aliases(attrs, using_namespaces) or {}), **module_aliases}
+            if annotation_alias_target is not None:
+                aliases[name] = annotation_alias_target
+            return aliases
 
-        aliases = get_aliases()
+        aliases = get_aliases(name)
         injected_method = await self.inject_async(bound_method, aliases, namespace)
 
         if attrs.check('singleton'):
@@ -755,20 +769,21 @@ class Injector:
         self.ns_index.add(name)
         self.resources[name] = resource
         self.resource_attrs[name] = attrs
-        self.dep_graph[name] = lambda: [resolve_alias(x, get_aliases()) for x in params]
+        self.dep_graph[name] = lambda: [resolve_alias(x, get_aliases(x)) for x in params]
 
     def _bind_resource(self, bound_method, module_aliases = {}, namespace = None):
         return self.loop.run_until_complete(self._bind_resource_async(bound_method, module_aliases, namespace))
 
     def _check_for_cycles(self):
-        visited = set()
-
-        def visit(resource):
+        def visit(resource, visited = None):
+            if visited is None:
+                visited = set()
             visited.add(resource)
             for dep in self.dep_graph.get(resource, lambda: ())():
-                if dep in visited or visit(dep):
+                if dep in visited:
                     raise CircularDependencyError(resource, dep)
-            visited.remove(resource)
+                else:
+                    visit(dep, set(visited))
 
         for resource in self.dep_graph.keys():
             visit(resource)

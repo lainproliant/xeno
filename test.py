@@ -331,6 +331,7 @@ class XenoTests(unittest.TestCase):
                 return self.name
 
         injector = Injector(ModuleA(), ModuleB(), ModuleC())
+        deps = injector.get_dependencies('A/name')
         name = injector.create(NameContainer).get()
         self.assertEqual(name, 'Lain Supe')
 
@@ -716,6 +717,28 @@ class XenoTests(unittest.TestCase):
         t1 = timer()
         self.assertTrue(t1 - t0 < SLEEP * 2)
         self.assertEqual(n, 6)
+
+    def test_funky_singletons(self):
+        outerSelf = self
+        class Module:
+            @provide
+            @singleton
+            def dictionary(self):
+                dictionary = {}
+                dictionary['a'] = 1
+                return dictionary
+
+            @provide
+            def updated_dictionary(self, dictionary):
+                dictionary['b'] = 2
+
+            @provide
+            def asserted_updated_dictionary(self, updated_dictionary, dictionary):
+                outerSelf.assertEqual(dictionary['a'], 1)
+                outerSelf.assertEqual(dictionary['b'], 2)
+
+        injector = Injector(Module())
+        injector.require('asserted_updated_dictionary')
 
 #--------------------------------------------------------------------
 if __name__ == '__main__':
