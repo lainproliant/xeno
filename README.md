@@ -1,4 +1,5 @@
-# Xeno: The Python dependency injector from outer space.
+# Xeno: The Python dependency injector from outer space. 
+[![Build Status](https://travis-ci.org/lainproliant/xeno.svg?branch=master)](https://travis-ci.org/lainproliant/xeno)
 
 Xeno is a simple Python dependency injection framework. Use it when you
 need to manage complex inter-object dependencies in a clean way. For the
