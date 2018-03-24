@@ -521,6 +521,7 @@ class Injector:
         self.singletons = {}
         self.dep_graph = {}
         self.injection_interceptors = []
+        self.async_injection_interceptors = []
         self.ns_index = Namespace.root()
         self.resource_attrs = {}
 
@@ -569,6 +570,9 @@ class Injector:
         """
         self.injection_interceptors.append(interceptor)
 
+    def add_async_injection_interceptor(self, interceptor):
+        self.async_injection_interceptors.add(interceptor)
+
     def create(self, class_):
         """
         Create an instance of the specified class.  The class' constructor
@@ -598,7 +602,7 @@ class Injector:
         try:
             dependency_map = await self._resolve_dependencies(class_.__init__, unbound_ctor = True)
             attrs = MethodAttributes.for_method(class_.__init__)
-            dependency_map = self._invoke_injection_interceptors(attrs, dependency_map)
+            dependency_map = await self._invoke_injection_interceptors(attrs, dependency_map)
         except MethodInjectionError as e:
             raise ClassInjectionError(class_, e.name)
 
@@ -829,13 +833,15 @@ class Injector:
             attrs = MethodAttributes.for_method(method)
             aliases = {**aliases, **attrs.get('aliases', {})}
             dependency_map = await self._resolve_dependencies(method, aliases = aliases, namespace = namespace)
-            depencency_map = self._invoke_injection_interceptors(attrs, dependency_map)
+            depencency_map = await self._invoke_injection_interceptors(attrs, dependency_map)
             return await async_wrap(method, **dependency_map)
         return wrapper
 
-    def _invoke_injection_interceptors(self, attrs, dependency_map):
+    async def _invoke_injection_interceptors(self, attrs, dependency_map):
         for interceptor in self.injection_interceptors:
             dependency_map = interceptor(attrs, dependency_map)
+        for interceptor in self.async_injection_interceptors:
+            dependency_map = await interceptor(attrs, dependency_map)
         return dependency_map
 
     def _get_aliases(self, attrs, namespaces = []):
