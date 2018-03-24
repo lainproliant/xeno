@@ -571,7 +571,7 @@ class Injector:
         self.injection_interceptors.append(interceptor)
 
     def add_async_injection_interceptor(self, interceptor):
-        self.async_injection_interceptors.add(interceptor)
+        self.async_injection_interceptors.append(interceptor)
 
     def create(self, class_):
         """
