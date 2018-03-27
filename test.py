@@ -720,25 +720,37 @@ class XenoTests(unittest.TestCase):
 
     def test_funky_singletons(self):
         outerSelf = self
+        
+        @namespace('oranges/are/bananas')
+        @using('peanuts')
         class Module:
-            @provide
+            counter = 0
+
             @singleton
-            def dictionary(self):
-                dictionary = {}
-                dictionary['a'] = 1
-                return dictionary
+            def single(self):
+                Module.counter += 1
+                return 1
 
             @provide
-            def updated_dictionary(self, dictionary):
-                dictionary['b'] = 2
+            def other1(self, single):
+                return single + 1
 
             @provide
-            def asserted_updated_dictionary(self, updated_dictionary, dictionary):
-                outerSelf.assertEqual(dictionary['a'], 1)
-                outerSelf.assertEqual(dictionary['b'], 2)
+            def other2(self, single):
+                return single + 2
+
+            @provide
+            def combined(self, other1, other2):
+                return other1 + other2
 
         injector = Injector(Module())
-        injector.require('asserted_updated_dictionary')
+        other1 = injector.require('oranges/are/bananas/other1')
+        other2 = injector.require('oranges/are/bananas/other2')
+        combined = injector.require('oranges/are/bananas/combined')
+        self.assertEqual(Module.counter, 1)
+        self.assertEqual(other1, 2)
+        self.assertEqual(other2, 3)
+        self.assertEqual(combined, 5)
 
 #--------------------------------------------------------------------
 if __name__ == '__main__':
