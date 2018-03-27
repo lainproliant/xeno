@@ -720,16 +720,20 @@ class XenoTests(unittest.TestCase):
 
     def test_funky_singletons(self):
         outerSelf = self
-        
+
         @namespace('oranges/are/bananas')
         @using('peanuts')
         class Module:
             counter = 0
 
             @singleton
-            def single(self):
+            def nothing(self):
+                return 0
+
+            @singleton
+            def single(self, nothing):
                 Module.counter += 1
-                return 1
+                return 1 + nothing
 
             @provide
             def other1(self, single):

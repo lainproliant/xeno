@@ -668,6 +668,8 @@ class Injector:
         return await self._require_coro(name, method)
 
     async def provide_async(self, name, value, is_singleton = False, namespace = None):
+        if name in self.singletons:
+            del self.singletons[name]
         if inspect.ismethod(value) or inspect.isfunction(value):
             if is_singleton:
                 value = singleton(value)
@@ -865,5 +867,8 @@ class Injector:
             else:
                 raise MissingResourceError(name)
         else:
-            return await async_wrap(self.resources[name])
+            if name in self.singletons:
+                return self.singletons[name]
+            else:
+                return await async_wrap(self.resources[name])
 
