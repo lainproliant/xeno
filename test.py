@@ -731,12 +731,13 @@ class XenoTests(unittest.TestCase):
                 return 0
 
             @singleton
-            def single(self, nothing):
+            async def single(self, nothing):
                 Module.counter += 1
+                await asyncio.sleep(1)
                 return 1 + nothing
 
             @provide
-            def other1(self, single):
+            async def other1(self, single):
                 return single + 1
 
             @provide

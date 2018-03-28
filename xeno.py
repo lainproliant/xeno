@@ -816,7 +816,12 @@ class Injector:
                     resource_name = resource_name[len(Namespace.SEP):]
                 resource_name = resolve_alias(resource_name, aliases)
                 resource_async_map[param] = self._require_coro(resource_name)
-            dependency_map = dict(await asyncio.gather(*(async_map(k, c) for k, c in resource_async_map.items()), loop = self.loop))
+
+            for k, c in resource_async_map.items():
+                v = await c
+                dependency_map[k] = v
+
+            #dependency_map = dict(await asyncio.gather(*(async_map(k, c) for k, c in resource_async_map.items()), loop = self.loop))
         except MissingResourceError as e:
             raise MissingDependencyError(full_name, e.name) from e
         return dependency_map
