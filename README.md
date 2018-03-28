@@ -81,6 +81,13 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 2.6.0: March 27 2018
+- Bugfix release: Remove support for implicit asynchronous resolution of
+  dependencies.  Providers can still be async, in order to await some other
+  set of coroutines, but can no longer themselves be run in sync.  The
+  benefits do not outweigh the complexity of bugs and timing concerns
+  introduced by this approach.
+
 ### Version 2.5.0: March 2, 2018
 - Added `Injector.provide_async()`.  Note that resource are always run within an
   event loop and should not use `inject()`, `provide()`, or `require()`
