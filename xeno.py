@@ -468,8 +468,8 @@ def get_injection_params(f, unbound_ctor = False):
                 default_param_set.add(param.name)
             injection_param_names.append(param.name)
         else:
-            raise InjectionError('xeno only supports injection of POSITIONAL_OR_KEYWORD and KEYWORD_ONLY arguments, %s arguments (%s) are not supported.' % (
-                param.kind, param.name))
+            raise InjectionError('Xeno only supports injection of POSITIONAL_OR_KEYWORD and KEYWORD_ONLY arguments, %s arguments (%s of %s) are not supported.' % (
+                param.kind, param.name, f.__qualname__))
     return injection_param_names, default_param_set
 
 #--------------------------------------------------------------------
