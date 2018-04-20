@@ -81,6 +81,10 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 2.7.0: April 20 2018
+- The `Injector` now adds a `'resource-name'` attribute to resource methods allowing
+  the inspection of a resource's full canonical name at runtime.
+
 ### Version 2.6.0: March 27 2018
 - Bugfix release: Remove support for implicit asynchronous resolution of
   dependencies.  Providers can still be async, in order to await some other

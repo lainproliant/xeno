@@ -772,6 +772,9 @@ class Injector:
         else:
             resource = injected_method
 
+        # Make the canonical full resource name available via 'resource-name'.
+        attrs.put('resource-name', name)
+
         self.ns_index.add(name)
         self.resources[name] = resource
         self.resource_attrs[name] = attrs

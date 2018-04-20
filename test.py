@@ -663,6 +663,33 @@ class XenoTests(unittest.TestCase):
         self.assertTrue('third_thing' in impl_list)
         self.assertTrue('fourth_thing' in impl_list)
 
+    def test_resource_name_attribute(self):
+        outerSelf = self
+
+        @namespace('com/example/core')
+        class Core:
+            @provide
+            def apples(self):
+                attrs = MethodAttributes.for_method(self.apples)
+                outerSelf.assertEqual(attrs.get('resource-name'), 'com/example/core/apples')
+                return 'apples'
+
+            @provide
+            def oranges(self):
+                attrs = MethodAttributes.for_method(self.oranges)
+                outerSelf.assertEqual(attrs.get('resource-name'), 'com/example/core/oranges')
+                return 'oranges'
+
+        injector = Injector(Core())
+
+        def assert_resource_name(key, attrs):
+            self.assertEqual(key, attrs.get('resource-name'))
+            return True
+
+        injector.scan_resources(assert_resource_name)
+        attrs = injector.get_resource_attributes('com/example/core/apples')
+        self.assertEqual(attrs.get('resource-name'), 'com/example/core/apples')
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()
