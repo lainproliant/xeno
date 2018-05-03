@@ -178,6 +178,7 @@ class MethodAttributes(Attributes):
         self.put('name', f.__name__)
         self.put('qualname', f.__qualname__)
         self.put('annotations', getattr(f, '__annotations__', {}))
+        self.put('params', get_params_from_signature(f))
 
     def get_annotation(self, name):
         return self.get('annotations').get(name, None)
@@ -432,6 +433,14 @@ def get_providers(obj):
     return scan_methods(obj, lambda attr: attr.check('provider'))
 
 #--------------------------------------------------------------------
+def get_params_from_signature(f):
+    """
+    Fetches the params tuple list from the given function's signature.
+    """
+    sig = inspect.signature(f)
+    return list(sig.parameters.values())
+
+#--------------------------------------------------------------------
 def get_injection_params(f, unbound_ctor = False):
     """
     Fetches the injectable parameter names of parameters to the given
@@ -445,22 +454,26 @@ def get_injection_params(f, unbound_ctor = False):
     unbound_ctor must be set to True to prevent 'self' from being
     returned by this method as an injectable parameter.
     """
-    sig = inspect.signature(f)
     injection_param_names = []
     default_param_set = set()
-    params = list(sig.parameters.values())
+    params = []
 
-    if not inspect.ismethod(f) and unbound_ctor:
-        if not inspect.isfunction(f):
-            # We do not want to try to inject a slot wrapper
-            # version of __init__, as its params are (*args, **kwargs)
-            # and it does nothing anyway.
-            return [], set()
+    if not inspect.ismethod(f) and unbound_ctor and not inspect.isfunction(f):
+        # We do not want to try to inject a slot wrapper
+        # version of __init__, as its params are (*args, **kwargs)
+        # and it does nothing anyway.
+        return [], set()
 
-        else:
-            # Don't try to inject the 'self' parameter of an
-            # unbound constructor.
-            params = params[1:]
+    attr = MethodAttributes.for_method(f)
+    if attr.check('params'):
+        params = attr.get('params')
+    else:
+        params = get_params_from_signature(f)
+
+    if inspect.ismethod(f) or unbound_ctor:
+        # Don't try to inject the 'self' parameter of an
+        # unbound constructor.
+        params = params[1:]
 
     for param in params:
         if param.kind in [inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY]:
@@ -819,7 +832,7 @@ class Injector:
                     resource_name = resource_name[len(Namespace.SEP):]
                 resource_name = resolve_alias(resource_name, aliases)
                 resource_async_map[param] = self._require_coro(resource_name)
-            
+
             for k, c in resource_async_map.items():
                 dependency_map[k] = await c
 
@@ -841,7 +854,7 @@ class Injector:
             attrs = MethodAttributes.for_method(method)
             aliases = {**aliases, **attrs.get('aliases', {})}
             dependency_map = await self._resolve_dependencies(method, aliases = aliases, namespace = namespace)
-            depencency_map = await self._invoke_injection_interceptors(attrs, dependency_map)
+            dependency_map = await self._invoke_injection_interceptors(attrs, dependency_map)
             return await async_wrap(method, **dependency_map)
         return wrapper
 

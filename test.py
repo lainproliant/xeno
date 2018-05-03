@@ -690,6 +690,31 @@ class XenoTests(unittest.TestCase):
         attrs = injector.get_resource_attributes('com/example/core/apples')
         self.assertEqual(attrs.get('resource-name'), 'com/example/core/apples')
 
+    def test_inject_decorated_provider(self):
+        def fancy(f):
+            @MethodAttributes.wraps(f)
+            def wrapper(*args, **kwargs):
+                result = f(*args, **kwargs)
+                return "The Right Honourable %s" % result
+            return wrapper
+
+        class Core:
+            @provide
+            @fancy
+            def name(self, first_name, last_name):
+                return '%s %s' % (first_name, last_name)
+
+            @provide
+            def first_name(self):
+                return 'Lain'
+
+            @provide
+            def last_name(self):
+                return 'Supe'
+
+        injector = Injector(Core())
+        self.assertEqual('The Right Honourable Lain Supe', injector.require('name'))
+
 #--------------------------------------------------------------------
 if __name__ == '__main__':
     unittest.main()

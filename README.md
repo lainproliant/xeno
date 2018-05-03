@@ -81,6 +81,10 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 2.8.0: May 3 2018
+- Allow decorated/wrapped methods to be properly injected if their `'params'` method attribute
+  is carried forward.
+
 ### Version 2.7.0: April 20 2018
 - The `Injector` now adds a `'resource-name'` attribute to resource methods allowing
   the inspection of a resource's full canonical name at runtime.
