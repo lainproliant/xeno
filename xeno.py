@@ -613,13 +613,13 @@ class Injector:
         methods with @inject and pass the instance to Injector.inject().
         """
         try:
-            dependency_map = await self._resolve_dependencies(class_.__init__, unbound_ctor = True)
+            param_map, alias_map = await self._resolve_dependencies(class_.__init__, unbound_ctor = True)
             attrs = MethodAttributes.for_method(class_.__init__)
-            dependency_map = await self._invoke_injection_interceptors(attrs, dependency_map)
+            param_map = await self._invoke_injection_interceptors(attrs, param_map, alias_map)
         except MethodInjectionError as e:
             raise ClassInjectionError(class_, e.name)
 
-        instance = class_(**dependency_map)
+        instance = class_(**param_map)
         await self._inject_instance(instance)
         return instance
 
@@ -813,7 +813,8 @@ class Injector:
     async def _resolve_dependencies(self, f, unbound_ctor = False, aliases = {}, namespace = ''):
         params, default_set = get_injection_params(f, unbound_ctor = unbound_ctor)
         attrs = MethodAttributes.for_method(f)
-        dependency_map = {}
+        param_map = {}
+        param_resource_map = {}
         full_name = attrs.get('name')
         if namespace:
             full_name = Namespace.join(namespace, full_name)
@@ -832,13 +833,14 @@ class Injector:
                     resource_name = resource_name[len(Namespace.SEP):]
                 resource_name = resolve_alias(resource_name, aliases)
                 resource_async_map[param] = self._require_coro(resource_name)
+                param_resource_map[param] = resource_name
 
             for k, c in resource_async_map.items():
-                dependency_map[k] = await c
+                param_map[k] = await c
 
         except MissingResourceError as e:
             raise MissingDependencyError(full_name, e.name) from e
-        return dependency_map
+        return param_map, param_resource_map
 
     async def _inject_instance(self, instance, aliases = {}, namespace = ''):
         class_attributes = ClassAttributes.for_class(instance.__class__)
@@ -853,17 +855,17 @@ class Injector:
             aliases = {**aliases_in}
             attrs = MethodAttributes.for_method(method)
             aliases = {**aliases, **attrs.get('aliases', {})}
-            dependency_map = await self._resolve_dependencies(method, aliases = aliases, namespace = namespace)
-            dependency_map = await self._invoke_injection_interceptors(attrs, dependency_map)
-            return await async_wrap(method, **dependency_map)
+            param_map, alias_map = await self._resolve_dependencies(method, aliases = aliases, namespace = namespace)
+            param_map = await self._invoke_injection_interceptors(attrs, param_map, alias_map)
+            return await async_wrap(method, **param_map)
         return wrapper
 
-    async def _invoke_injection_interceptors(self, attrs, dependency_map):
+    async def _invoke_injection_interceptors(self, attrs, param_map, alias_map):
         for interceptor in self.injection_interceptors:
-            dependency_map = interceptor(attrs, dependency_map)
+            param_map = interceptor(attrs, param_map, alias_map)
         for interceptor in self.async_injection_interceptors:
-            dependency_map = await interceptor(attrs, dependency_map)
-        return dependency_map
+            param_map = await interceptor(attrs, param_map, alias_map)
+        return param_map
 
     def _get_aliases(self, attrs, namespaces = []):
         aliases = attrs.get('aliases', {})

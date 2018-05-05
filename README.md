@@ -81,6 +81,11 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 3.0.0: May 4 2018
+***BACKWARDS INCOMPATIBLE CHANGE***
+- Provide injection interceptors with an alias map for the given param map.
+- This change breaks all existing injection interceptors until the new param is added.
+
 ### Version 2.8.0: May 3 2018
 - Allow decorated/wrapped methods to be properly injected if their `'params'` method attribute
   is carried forward.
@@ -121,7 +126,8 @@ Checkout `test.py` in the git repo for more usage examples.
 - Allow multiple resource names to be provided to `Injector.get_dependency_graph()`.
 
 ### Version 2.0.0: July 25th, 2017
-- Change the default namespace separator and breakout symbol to '/' (backwards incompatible change)
+***BACKWARDS INCOMPATIBLE CHANGE***
+- Change the default namespace separator and breakout symbol to '/'
 
 Code using the old namespace separator can be made to work by overriding the value of xeno.Namespace.SEP:
 ```

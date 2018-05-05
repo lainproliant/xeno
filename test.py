@@ -277,15 +277,15 @@ class XenoTests(unittest.TestCase):
                 test.assertTrue(isinstance(phone_number, str))
                 return "Lain Supe: %s" % phone_number
 
-        def intercept_phone_number(attrs, dependency_map):
-            if 'phone_number' in dependency_map:
-                dependency_map['phone_number'] = str(dependency_map['phone_number'])
-            return dependency_map
+        def intercept_phone_number(attrs, param_map, alias_map):
+            if 'phone_number' in param_map:
+                param_map['phone_number'] = str(param_map['phone_number'])
+            return param_map
 
-        def intercept_address_card(attrs, dependency_map):
-            if 'address_card' in dependency_map:
-                dependency_map['address_card'] += '\n2000 Street Blvd, Seattle WA 98125'
-            return dependency_map
+        def intercept_address_card(attrs, param_map, alias_map):
+            if 'address_card' in param_map:
+                param_map['address_card'] += '\n2000 Street Blvd, Seattle WA 98125'
+            return param_map
 
         class AddressPrinter:
             def __init__(self, address_card):
@@ -373,6 +373,37 @@ class XenoTests(unittest.TestCase):
         with self.assertRaises(InjectionError) as context:
             injector = Injector(ModuleA())
         self.assertTrue(str(context.exception).startswith('Alias loop detected'))
+
+    def test_cross_namespace_alias(self):
+        @namespace('a')
+        class ModuleA:
+            @provide
+            def value(self):
+                return 1
+
+        @namespace('b')
+        class ModuleB:
+            @provide
+            def result(self, value: 'a/value'):
+                return value + 1
+        
+        injector = Injector(ModuleA(), ModuleB())
+        self.assertEqual(2, injector.require('b/result'))
+
+    def test_root_to_namespace_alias(self):
+        @namespace('a')
+        class ModuleA:
+            @provide
+            def value(self):
+                return 1
+
+        class ModuleB:
+            @provide
+            def result(self, value: 'a/value'):
+                return value + 1
+        
+        injector = Injector(ModuleA(), ModuleB())
+        self.assertEqual(2, injector.require('result'))
 
     def test_nested_namespaces(self):
         @namespace("com/lainproliant/stuff")
