@@ -81,6 +81,9 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 3.1.0: August 29 2018
+- Add ClassAttributes.for_object convenience method
+
 ### Version 3.0.0: May 4 2018
 ***BACKWARDS INCOMPATIBLE CHANGE***
 - Provide injection interceptors with an alias map for the given param map.

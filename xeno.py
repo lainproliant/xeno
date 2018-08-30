@@ -167,6 +167,10 @@ class ClassAttributes(Attributes):
             class_, create, write, factory=lambda x: ClassAttributes(x)
         )
 
+    @staticmethod
+    def for_object(obj, create=True, write=False):
+        return ClassAttributes.for_class(obj.__class__, create, write)
+
     def __init__(self, class_):
         super().__init__()
         self.put("name", class_.__name__)
