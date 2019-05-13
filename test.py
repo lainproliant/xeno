@@ -1,8 +1,13 @@
 import unittest
-import asyncio
-from xeno import *
 
-# --------------------------------------------------------------------
+from xeno import (
+    CircularDependencyError, MethodAttributes, MissingResourceError,
+    provide, inject, namespace, alias, named, using, const,
+    singleton, Injector, MissingDependencyError, InjectionError,
+    InvalidResourceError
+)
+
+
 class XenoTests(unittest.TestCase):
     def test_ctor_injection(self):
         """Test to verify that constructor injection works properly."""
@@ -118,7 +123,7 @@ class XenoTests(unittest.TestCase):
 
         injector = Injector(Module())
         with self.assertRaises(InjectionError):
-            printer = injector.create(NamePrinter)
+            injector.create(NamePrinter)
 
     def test_illegal_module_injection(self):
         """Test to verify that a module @provide method with invalid
@@ -209,15 +214,14 @@ class XenoTests(unittest.TestCase):
                 return 1
 
         with self.assertRaises(CircularDependencyError):
-            injector = Injector(Module())
+            Injector(Module())
 
     def test_create_no_ctor(self):
         class ClassNoCtor:
             def f(self):
                 pass
 
-        injector = Injector()
-        c = injector.create(ClassNoCtor)
+        Injector().create(ClassNoCtor)
 
     def test_inject_from_subclass(self):
         class Module:
@@ -287,7 +291,8 @@ class XenoTests(unittest.TestCase):
 
         def intercept_address_card(attrs, param_map, alias_map):
             if "address_card" in param_map:
-                param_map["address_card"] += "\n2000 Street Blvd, Seattle WA 98125"
+                param_map["address_card"] += \
+                    "\n2000 1st Street, Seattle WA 98125"
             return param_map
 
         class AddressPrinter:
@@ -297,7 +302,7 @@ class XenoTests(unittest.TestCase):
             def print_address(self):
                 test.assertEqual(
                     self.address_card,
-                    "Lain Supe: 2060000000\n2000 Street Blvd, Seattle WA 98125",
+                    "Lain Supe: 2060000000\n2000 1st Street, Seattle WA 98125",
                 )
 
         injector = Injector(Module())
@@ -305,41 +310,6 @@ class XenoTests(unittest.TestCase):
         injector.add_injection_interceptor(intercept_address_card)
         printer = injector.create(AddressPrinter)
         printer.print_address()
-
-    def test_namespaces_and_annotated_resource_params(self):
-        @namespace("A")
-        class ModuleA:
-            @provide
-            @named("first-name")
-            def first(self):
-                return "Lain"
-
-        @namespace("B")
-        class ModuleB:
-            @provide
-            @named("last-name")
-            def last(self):
-                return "Supe"
-
-        @namespace("C")
-        @using("A")
-        class ModuleC:
-            @provide
-            def name(self, first: "first-name", last: "B/last-name"):
-                return "%s %s" % (first, last)
-
-        class NameContainer:
-            @inject
-            def __init__(self, name: "C/name"):
-                self.name = name
-
-            def get(self):
-                return self.name
-
-        injector = Injector(ModuleA(), ModuleB(), ModuleC())
-        deps = injector.get_dependencies("A/name")
-        name = injector.create(NameContainer).get()
-        self.assertEqual(name, "Lain Supe")
 
     def test_basic_alias(self):
         class ModuleA:
@@ -377,8 +347,9 @@ class XenoTests(unittest.TestCase):
                 return full_name
 
         with self.assertRaises(InjectionError) as context:
-            injector = Injector(ModuleA())
-        self.assertTrue(str(context.exception).startswith("Alias loop detected"))
+            Injector(ModuleA())
+        self.assertTrue(str(context.exception).startswith(
+            "Alias loop detected"))
 
     def test_cross_namespace_alias(self):
         @namespace("a")
@@ -388,9 +359,10 @@ class XenoTests(unittest.TestCase):
                 return 1
 
         @namespace("b")
+        @alias('value', 'a/value')
         class ModuleB:
             @provide
-            def result(self, value: "a/value"):
+            def result(self, value):
                 return value + 1
 
         injector = Injector(ModuleA(), ModuleB())
@@ -405,7 +377,8 @@ class XenoTests(unittest.TestCase):
 
         class ModuleB:
             @provide
-            def result(self, value: "a/value"):
+            @alias('value', 'a/value')
+            def result(self, value):
                 return value + 1
 
         injector = Injector(ModuleA(), ModuleB())
@@ -421,7 +394,8 @@ class XenoTests(unittest.TestCase):
         @namespace("com/lainproliant/other_stuff")
         class ModuleB:
             @provide
-            def address(self, name: "com/lainproliant/stuff/name"):
+            @alias('name', 'com/lainproliant/stuff/name')
+            def address(self, name):
                 return "%s: Seattle, WA" % name
 
         @using("com/lainproliant/other_stuff")
@@ -476,7 +450,8 @@ class XenoTests(unittest.TestCase):
         self.assertTrue("zip_code" in dep_tree)
         self.assertTrue("first_name" in dep_tree["name"])
         self.assertTrue("last_name" in dep_tree["name"])
-        self.assertEqual("Pontifex Rex\n1024 Street Ave\nSeattle, WA 98101", address)
+        self.assertEqual("Pontifex Rex\n1024 Street Ave\nSeattle, WA 98101",
+                         address)
 
     def test_injector_provide(self):
         class ModuleA:
@@ -623,7 +598,8 @@ class XenoTests(unittest.TestCase):
                 return "123 Main St."
 
             @provide
-            def first_name(self, name: "/A/first_name"):
+            @alias('name', 'A/first_name')
+            def first_name(self, name):
                 return name[::-1]
 
         injector = Injector(ModuleA(), ModuleB())
@@ -659,9 +635,12 @@ class XenoTests(unittest.TestCase):
                 return 5
 
         injector = Injector(ModuleA())
-        self.assertListEqual([*sorted(injector.get_dependencies("d"))], ["a", "b", "c"])
-        self.assertListEqual([*sorted(injector.get_dependencies("e"))], ["b", "d"])
-        self.assertListEqual([*sorted(injector.get_dependencies("a"))], [])
+        self.assertListEqual([*sorted(injector.get_dependencies("d"))],
+                             ["a", "b", "c"])
+        self.assertListEqual([*sorted(injector.get_dependencies("e"))],
+                             ["b", "d"])
+        self.assertListEqual([*sorted(injector.get_dependencies("a"))],
+                             [])
 
     def test_namespace_get_leaves(self):
         @namespace("com/example/core")
@@ -755,9 +734,9 @@ class XenoTests(unittest.TestCase):
                 return "Supe"
 
         injector = Injector(Core())
-        self.assertEqual("The Right Honourable Lain Supe", injector.require("name"))
+        self.assertEqual("The Right Honourable Lain Supe",
+                         injector.require("name"))
 
 
-# --------------------------------------------------------------------
 if __name__ == "__main__":
     unittest.main()

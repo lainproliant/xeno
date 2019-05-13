@@ -81,6 +81,11 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 4.0.0: May 12 2019
+***BACKWARDS INCOMPATIBLE CHANGE***
+- Removed support for parameter annotation aliases.  Use `@alias` on methods instead.
+  This was removed to allow Xeno code to play nicely with PEP 484 type hinting.
+
 ### Version 3.1.0: August 29 2018
 - Add ClassAttributes.for_object convenience method
 

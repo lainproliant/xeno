@@ -1,11 +1,9 @@
-# --------------------------------------------------------------------
 # Xeno: The Python dependency injector from outer space.
 #
 # Author: Lain Supe (lainproliant)
 # Date: Sunday, August 28th 2016
 #
 # Released under a 3-clause BSD license, see LICENSE for more info.
-# --------------------------------------------------------------------
 __all__ = [
     "InjectionError",
     "MissingResourceError",
@@ -36,49 +34,42 @@ __all__ = [
     "Injector",
 ]
 
-# --------------------------------------------------------------------
+
 import asyncio
-import collections
 import inspect
 
-# --------------------------------------------------------------------
+
 NOTHING = object()
 
-# --------------------------------------------------------------------
+
 class InjectionError(Exception):
     pass
 
 
-# --------------------------------------------------------------------
 class MissingResourceError(InjectionError):
     def __init__(self, name):
         super().__init__('The resource "%s" was not provided.' % name)
         self.name = name
 
 
-# --------------------------------------------------------------------
 class MissingDependencyError(InjectionError):
     def __init__(self, name, dep_name):
         super().__init__(
-            'The resource "%s" required by "%s" was not provided.' % (dep_name, name)
-        )
+            f'Resource "{dep_name}" required by "{name}" was not provided.')
         self.name = name
         self.dep_name = dep_name
 
 
-# --------------------------------------------------------------------
 class MethodInjectionError(InjectionError):
     def __init__(self, method, name, reason=None):
         super().__init__(
-            'Failed to inject "%s" into method "%s".' % (name, method.__qualname__)
-            + reason
-            or ""
+            f'Failed to inject "{name}" into {method.__qualname__}'
+            + f': {reason}' if reason else '.'
         )
         self.method = method
         self.name = name
 
 
-# --------------------------------------------------------------------
 class ClassInjectionError(InjectionError):
     def __init__(self, class_, name, reason=None):
         super().__init__(
@@ -91,42 +82,39 @@ class ClassInjectionError(InjectionError):
         self.name = name
 
 
-# --------------------------------------------------------------------
 class CircularDependencyError(InjectionError):
     def __init__(self, resource, dep):
         super().__init__(
-            'Circular dependency detected between "%s" and "%s".' % (resource, dep)
+            'Circular dependency detected between "%s" and "%s".' % (
+                resource, dep)
         )
         self.resource = resource
         self.dep = dep
 
 
-# --------------------------------------------------------------------
 class UndefinedNameError(InjectionError):
     def __init__(self, name):
         super().__init__('Undefined name: "%s"' % name)
         self.name = name
 
 
-# --------------------------------------------------------------------
 class UnknownNamespaceError(InjectionError):
     def __init__(self, name):
         super().__init__('Unknown namespace: "%s"' % name)
         self.name = name
 
 
-# --------------------------------------------------------------------
 class InvalidResourceError(InjectionError):
     pass
 
 
-# --------------------------------------------------------------------
 class Attributes:
     def __init__(self):
         self.attr_map = {}
 
     @staticmethod
-    def for_object(obj, create=True, write=False, factory=lambda: Attributes()):
+    def for_object(obj, create=True, write=False,
+                   factory=lambda: Attributes()):
         try:
             return obj._attrs
 
@@ -159,7 +147,6 @@ class Attributes:
         return self
 
 
-# --------------------------------------------------------------------
 class ClassAttributes(Attributes):
     @staticmethod
     def for_class(class_, create=True, write=False):
@@ -177,7 +164,6 @@ class ClassAttributes(Attributes):
         self.put("qualname", class_.__qualname__)
 
 
-# --------------------------------------------------------------------
 class MethodAttributes(Attributes):
     @staticmethod
     def for_method(f, create=True, write=False):
@@ -207,14 +193,9 @@ class MethodAttributes(Attributes):
         super().__init__()
         self.put("name", f.__name__)
         self.put("qualname", f.__qualname__)
-        self.put("annotations", getattr(f, "__annotations__", {}))
         self.put("params", get_params_from_signature(f))
 
-    def get_annotation(self, name):
-        return self.get("annotations").get(name, None)
 
-
-# --------------------------------------------------------------------
 class Namespace:
     ROOT = "@root"
     SEP = "/"
@@ -243,7 +224,8 @@ class Namespace:
         if len(parts) == 1:
             if name in self.sub_namespaces:
                 raise ValueError(
-                    'Leaf node cannot have the same name as an existing namespace: "%s"'
+                    'Leaf node cannot have the same name as an existing '
+                    'namespace: "%s"'
                     % name
                 )
             self.leaves.add(name)
@@ -251,7 +233,8 @@ class Namespace:
             if not parts[0] in self.sub_namespaces:
                 if parts[0] in self.leaves:
                     raise ValueError(
-                        'Namespace cannot have the same name as an existing leaf node: "%s"'
+                        'Namespace cannot have the same name as an existing '
+                        'leaf node: "%s"'
                         % parts[0]
                     )
                 self.sub_namespaces[parts[0]] = Namespace(parts[0])
@@ -301,7 +284,6 @@ class Namespace:
             return leaves
 
 
-# --------------------------------------------------------------------
 async def async_map(key, coro):
     """
     Wraps a coroutine so that when executed, the coroutine result
@@ -311,7 +293,6 @@ async def async_map(key, coro):
     return key, await coro
 
 
-# --------------------------------------------------------------------
 async def async_wrap(f, *args, **kwargs):
     """
     Wraps a normal function in a coroutine.  If the given function
@@ -323,7 +304,6 @@ async def async_wrap(f, *args, **kwargs):
         return await f(*args, **kwargs)
 
 
-# --------------------------------------------------------------------
 def singleton(f):
     """
     Method annotation indicating a named singleton resource.
@@ -339,7 +319,6 @@ def singleton(f):
     return f
 
 
-# --------------------------------------------------------------------
 def provide(f):
     """
     Method annotation indicating a named resource.
@@ -354,7 +333,6 @@ def provide(f):
     return f
 
 
-# --------------------------------------------------------------------
 def inject(f):
     """
     Method annotation indicating an injection point in an object.
@@ -372,7 +350,6 @@ def inject(f):
     return f
 
 
-# --------------------------------------------------------------------
 def named(name):
     """
     Method annotation indicating a name for the given resource other
@@ -387,7 +364,6 @@ def named(name):
     return impl
 
 
-# --------------------------------------------------------------------
 def alias(alias, name):
     """
     Aliases a single resource to a different name in the given
@@ -408,7 +384,6 @@ def alias(alias, name):
     return impl
 
 
-# --------------------------------------------------------------------
 def namespace(name):
     """
     Module annotation indicating that the resources defined inside
@@ -424,7 +399,6 @@ def namespace(name):
     return impl
 
 
-# --------------------------------------------------------------------
 def const(name, value):
     """
     Module annotation defining a constant resource scoped into the
@@ -441,7 +415,6 @@ def const(name, value):
     return impl
 
 
-# --------------------------------------------------------------------
 def using(name):
     def impl(obj):
         attrs = None
@@ -457,25 +430,23 @@ def using(name):
     return impl
 
 
-# --------------------------------------------------------------------
 def bind_unbound_method(obj, method):
     return method.__get__(obj, obj.__class__)
 
 
-# --------------------------------------------------------------------
 def scan_methods(obj, filter_f):
     """
     Scan the object for methods that match the given attribute filter
     and return them as a stream of tuples.
     """
     for class_ in inspect.getmro(obj.__class__):
-        for name, method in inspect.getmembers(class_, predicate=inspect.isfunction):
+        for name, method in inspect.getmembers(class_,
+                                               predicate=inspect.isfunction):
             attrs = MethodAttributes.for_method(method, create=False)
             if attrs is not None and filter_f(attrs):
                 yield (attrs, bind_unbound_method(obj, method))
 
 
-# --------------------------------------------------------------------
 def get_injection_points(obj):
     """
     Scan the object and all of its parents for injection points
@@ -485,7 +456,6 @@ def get_injection_points(obj):
     return scan_methods(obj, lambda attr: attr.check("injection-point"))
 
 
-# --------------------------------------------------------------------
 def get_providers(obj):
     """
     Scan the object and all of its parents for providers and return
@@ -495,7 +465,6 @@ def get_providers(obj):
     return scan_methods(obj, lambda attr: attr.check("provider"))
 
 
-# --------------------------------------------------------------------
 def get_params_from_signature(f):
     """
     Fetches the params tuple list from the given function's signature.
@@ -504,7 +473,6 @@ def get_params_from_signature(f):
     return list(sig.parameters.values())
 
 
-# --------------------------------------------------------------------
 def get_injection_params(f, unbound_ctor=False):
     """
     Fetches the injectable parameter names of parameters to the given
@@ -549,13 +517,14 @@ def get_injection_params(f, unbound_ctor=False):
             injection_param_names.append(param.name)
         else:
             raise InjectionError(
-                "Xeno only supports injection of POSITIONAL_OR_KEYWORD and KEYWORD_ONLY arguments, %s arguments (%s of %s) are not supported."
+                "Xeno only supports injection of POSITIONAL_OR_KEYWORD and "
+                "KEYWORD_ONLY arguments, %s arguments (%s of %s) "
+                "are not supported."
                 % (param.kind, param.name, f.__qualname__)
             )
     return injection_param_names, default_param_set
 
 
-# --------------------------------------------------------------------
 def resolve_alias(name, aliases, visited=None):
     if visited is None:
         visited = set()
@@ -570,16 +539,6 @@ def resolve_alias(name, aliases, visited=None):
     return name
 
 
-# --------------------------------------------------------------------
-def resolve_annotation_alias(name, attrs):
-    annotation = attrs.get_annotation(name)
-    if annotation is not None:
-        if annotation.startswith(Namespace.SEP):
-            annotation = annotation[len(Namespace.SEP) :]
-    return annotation
-
-
-# --------------------------------------------------------------------
 class Injector:
     """
     An object responsible for collecting resources from modules and
@@ -707,12 +666,13 @@ class Injector:
         Inject a method or object instance with resources from this Injector.
 
         obj: A method or object instance.  If this is a method, all named
-             parameters are injected from the Injector.  If this is an instance,
-             its methods are scanned for injection points and these methods
-             are all invoked with resources from the Injector.
+             parameters are injected from the Injector.  If this is an
+             instance, its methods are scanned for injection points and these
+             methods are all invoked with resources from the Injector.
         aliases: An optional map from dependency alias to real dependency name.
         """
-        return self.loop.run_until_complete(self.inject_async(obj, aliases, namespace))
+        return self.loop.run_until_complete(
+            self.inject_async(obj, aliases, namespace))
 
     async def inject_async(self, obj, aliases={}, namespace=""):
         """
@@ -721,9 +681,9 @@ class Injector:
         This async method is meant to be awaited from another coroutine.
 
         obj: A method or object instance.  If this is a method, all named
-             parameters are injected from the Injector.  If this is an instance,
-             its methods are scanned for injection points and these methods
-             are all invoked with resources from the Injector.
+             parameters are injected from the Injector.  If this is an
+             instance, its methods are scanned for injection points and these
+             methods are all invoked with resources from the Injector.
         aliases: An optional map from dependency alias to real dependency name.
         """
         if inspect.isfunction(obj) or inspect.ismethod(obj):
@@ -736,7 +696,8 @@ class Injector:
         Require a named resource from this Injector.  If it can't be provided,
         an InjectionError is raised.
 
-        This method should only be called from outside of the asyncio event loop.
+        This method should only be called from outside of the asyncio
+        event loop.
 
         Optionally, a method can be specified.  This indicates the method that
         requires the resource for injection, and causes this method to throw
@@ -759,13 +720,14 @@ class Injector:
         """
         return await self._require_coro(name, method)
 
-    async def provide_async(self, name, value, is_singleton=False, namespace=None):
+    async def provide_async(self, name, value, is_singleton=False,
+                            namespace=None):
         if name in self.singletons:
             del self.singletons[name]
         if inspect.ismethod(value) or inspect.isfunction(value):
             if is_singleton:
                 value = singleton(value)
-            await self._bind_resource_async(resource, namespace=namespace)
+            await self._bind_resource_async(value, namespace=namespace)
         else:
 
             @named(name)
@@ -788,7 +750,7 @@ class Injector:
         return name in self.resources
 
     def get_dependency_tree(self, resource_name):
-        if not resource_name in self.resources:
+        if resource_name not in self.resources:
             raise MissingResourceError(resource_name)
         try:
             return {
@@ -801,10 +763,11 @@ class Injector:
     def get_dependency_graph(self, resource_name, *other_resource_names):
         resource_names = [resource_name, *other_resource_names]
         for name in resource_names:
-            if not name in self.resources:
+            if name not in self.resources:
                 raise MissingResourceError(name)
         try:
-            dep_graph = {name: self.get_dependencies(name) for name in resource_names}
+            dep_graph = {name: self.get_dependencies(name)
+                         for name in resource_names}
             for dep in dep_graph[resource_name]:
                 dep_graph.update(self.get_dependency_graph(dep))
             return dep_graph
@@ -815,7 +778,7 @@ class Injector:
         return self.dep_graph.get(resource_name, lambda: ())()
 
     def get_resource_attributes(self, resource_name):
-        if not resource_name in self.resource_attrs:
+        if resource_name not in self.resource_attrs:
             raise MissingResourceError(resource_name)
         return self.resource_attrs[resource_name]
 
@@ -828,9 +791,10 @@ class Injector:
         if unbind_all:
             self.singletons.clear()
         else:
-            if not resource_name in self.resources:
+            if resource_name not in self.resources:
                 raise MissingResourceError(resource_name)
-            if not self.get_resource_attributes(resource_name).check("singleton"):
+            if not self.get_resource_attributes(resource_name).check(
+                    "singleton"):
                 raise InvalidResourceError(
                     'Resource "%s" is not a singleton.' % resource_name
                 )
@@ -848,28 +812,27 @@ class Injector:
         # Allow names that begin with the namespace separator
         # to be scoped outside of the specified namespace.
         if name.startswith(Namespace.SEP):
-            name = name[len(Namespace.SEP) :]
+            name = name[len(Namespace.SEP):]
         elif namespace is not None:
             name = Namespace.join(namespace, name)
             using_namespaces.append(namespace)
 
         def get_aliases(name):
-            annotation_alias_target = resolve_annotation_alias(name, attrs)
             aliases = {
                 **(self._get_aliases(attrs, using_namespaces) or {}),
                 **module_aliases,
             }
-            if annotation_alias_target is not None:
-                aliases[name] = annotation_alias_target
             return aliases
 
         aliases = get_aliases(name)
-        injected_method = await self.inject_async(bound_method, aliases, namespace)
+        print(repr(aliases))
+        injected_method = await self.inject_async(bound_method, aliases,
+                                                  namespace)
 
         if attrs.check("singleton"):
 
             async def wrapper():
-                if not name in self.singletons:
+                if name not in self.singletons:
                     singleton = await injected_method()
                     self.singletons[name] = singleton
                     return singleton
@@ -912,7 +875,8 @@ class Injector:
     async def _resolve_dependencies(
         self, f, unbound_ctor=False, aliases={}, namespace=""
     ):
-        params, default_set = get_injection_params(f, unbound_ctor=unbound_ctor)
+        params, default_set = get_injection_params(
+            f, unbound_ctor=unbound_ctor)
         attrs = MethodAttributes.for_method(f)
         param_map = {}
         param_resource_map = {}
@@ -927,11 +891,8 @@ class Injector:
                 if param in default_set and not self.has(param):
                     continue
                 resource_name = param
-                annotation = attrs.get_annotation(param)
-                if annotation is not None:
-                    resource_name = annotation
                 if resource_name.startswith(Namespace.SEP):
-                    resource_name = resource_name[len(Namespace.SEP) :]
+                    resource_name = resource_name[len(Namespace.SEP):]
                 resource_name = resolve_alias(resource_name, aliases)
                 resource_async_map[param] = self._require_coro(resource_name)
                 param_resource_map[param] = resource_name
@@ -968,7 +929,8 @@ class Injector:
 
         return wrapper
 
-    async def _invoke_injection_interceptors(self, attrs, param_map, alias_map):
+    async def _invoke_injection_interceptors(self, attrs, param_map,
+                                             alias_map):
         for interceptor in self.injection_interceptors:
             param_map = interceptor(attrs, param_map, alias_map)
         for interceptor in self.async_injection_interceptors:
@@ -980,7 +942,8 @@ class Injector:
         for alias in aliases.keys():
             if Namespace.SEP in alias:
                 raise InjectionError(
-                    'Alias name may not contain the namespace separator: "%s"' % alias
+                    'Alias name may not contain the namespace '
+                    'separator: "%s"' % alias
                 )
         using_namespaces = namespaces + attrs.get("using-namespaces", [])
         for namespace in using_namespaces:
@@ -998,9 +961,10 @@ class Injector:
         For internal use only.  Used to tie together resources needed
         by other resources in this injector.
         """
-        if not name in self.resources:
+        if name not in self.resources:
             if method is not None:
-                raise MethodInjectionError(method, name, "Resource was not provided.")
+                raise MethodInjectionError(method, name,
+                                           "Resource was not provided.")
             else:
                 raise MissingResourceError(name)
         else:
@@ -1008,3 +972,4 @@ class Injector:
                 return self.singletons[name]
             else:
                 return await async_wrap(self.resources[name])
+

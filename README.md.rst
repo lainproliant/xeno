@@ -19,13 +19,13 @@ Installation is simple. With python3-pip, do the following:
 
 ::
 
-    $ sudo pip install -e .
+   $ sudo pip install -e .
 
 Or, to install the latest version available on PyPI:
 
 ::
 
-    $ sudo pip install xeno
+   $ sudo pip install xeno
 
 Usage
 =====
@@ -62,30 +62,62 @@ In this simple example, we inject an output stream into an object.
 
 ::
 
-    import sys
-    from xeno import *
+   import sys
+   from xeno import *
 
-    class OutputStreamModule:
-       @provide
-       def output_stream(self):
-          return sys.stdout
+   class OutputStreamModule:
+      @provide
+      def output_stream(self):
+         return sys.stdout
 
-    class VersionWriter:
-       def __init__(self, output_stream):
-          self.output_stream = output_stream
+   class VersionWriter:
+      def __init__(self, output_stream):
+         self.output_stream = output_stream
 
-       def write_version(self):
-          print('The python version is %s' % sys.version_info,
-                file=self.output_stream)
+      def write_version(self):
+         print('The python version is %s' % sys.version_info,
+               file=self.output_stream)
 
-    injector = Injector(OutputStreamModule())
-    writer = injector.create(VersionWriter)
-    writer.write_version()
+   injector = Injector(OutputStreamModule())
+   writer = injector.create(VersionWriter)
+   writer.write_version()
 
 Checkout ``test.py`` in the git repo for more usage examples.
 
 Change Log
 ----------
+
+Version 4.0.0: May 12 2019
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**BACKWARDS INCOMPATIBLE CHANGE** - Removed support for parameter
+annotation aliases. Use ``@alias`` on methods instead. This was removed
+to allow Xeno code to play nicely with PEP 484 type hinting.
+
+Version 3.1.0: August 29 2018
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Add ClassAttributes.for_object convenience method
+
+Version 3.0.0: May 4 2018
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**BACKWARDS INCOMPATIBLE CHANGE** - Provide injection interceptors with
+an alias map for the given param map. - This change breaks all existing
+injection interceptors until the new param is added.
+
+Version 2.8.0: May 3 2018
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Allow decorated/wrapped methods to be properly injected if their
+   ``'params'`` method attribute is carried forward.
+
+Version 2.7.0: April 20 2018
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  The ``Injector`` now adds a ``'resource-name'`` attribute to resource
+   methods allowing the inspection of a resource’s full canonical name
+   at runtime.
 
 Version 2.6.0: March 27 2018
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -145,22 +177,22 @@ Version 2.1.0: August 23rd, 2017
 Version 2.0.0: July 25th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Change the default namespace separator and breakout symbol to ‘/’
-   (backwards incompatible change)
+**BACKWARDS INCOMPATIBLE CHANGE** - Change the default namespace
+separator and breakout symbol to ‘/’
 
 Code using the old namespace separator can be made to work by overriding
 the value of xeno.Namespace.SEP:
 
 ::
 
-    import xeno
-    xeno.Namespace.SEP = '::'
+   import xeno
+   xeno.Namespace.SEP = '::'
 
 Version 1.10: July 25th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Allow names prefixed with ``::`` to escape their module’s namespace,
-   e.g. ``::top_level_item``
+   e.g. \ ``::top_level_item``
 
 Version 1.9: May 23rd, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -194,8 +226,8 @@ Version 1.7: May 16th, 2017
       given namespace to be automatically aliases into either the scope
       of a single resource or a whole module.
    -  Added support for resource function annotations via PEP 3107 to
-      allow inline aliases, e.g.
-      ``def my_resource(name: 'Name::something-important'):``
+      allow inline aliases,
+      e.g. \ ``def my_resource(name: 'Name::something-important'):``
 
 Version 1.6: April 26th, 2017
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
