@@ -574,7 +574,7 @@ class Injector:
 
         for module in modules:
             self.add_module(module, skip_cycle_check=True)
-        self._check_for_cycles()
+        self.check_for_cycles()
 
     def get_namespace(self, name=None):
         if name is None or name == Namespace.SEP:
@@ -601,7 +601,7 @@ class Injector:
             self._bind_resource(provider, module_aliases, namespace)
 
         if not skip_cycle_check:
-            self._check_for_cycles()
+            self.check_for_cycles()
 
     def add_injection_interceptor(self, interceptor):
         """
@@ -858,7 +858,7 @@ class Injector:
             self._bind_resource_async(bound_method, module_aliases, namespace)
         )
 
-    def _check_for_cycles(self):
+    def check_for_cycles(self):
         def visit(resource, visited=None):
             if visited is None:
                 visited = set()
