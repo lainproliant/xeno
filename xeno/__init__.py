@@ -825,7 +825,6 @@ class Injector:
             return aliases
 
         aliases = get_aliases(name)
-        print(repr(aliases))
         injected_method = await self.inject_async(bound_method, aliases,
                                                   namespace)
 

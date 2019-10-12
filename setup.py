@@ -11,7 +11,7 @@ with open(path.join(here, "README.md.rst"), encoding="utf-8") as f:
 
 setup(
     name="xeno",
-    version="4.0.3",
+    version="4.0.4",
     description="The Python dependency injector from outer space.",
     long_description=long_description,
     url="https://github.com/lainproliant/xeno",
