@@ -1,7 +1,7 @@
-from setuptools import setup, find_packages
-
 from codecs import open
 from os import path
+
+from setuptools import setup, find_packages
 
 here = path.abspath(path.dirname(__file__))
 
@@ -32,7 +32,7 @@ setup(
     packages=find_packages(),
     install_requires=[],
     extras_require={},
-    package_data={'xeno': ['*.pyi', 'py.typed']},
+    package_data={'xeno': ['*.pyi', 'py.typed', 'LICENSE']},
     data_files=[],
     entry_points={"console_scripts": []},
 )

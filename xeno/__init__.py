@@ -124,8 +124,7 @@ class Attributes:
                 if write:
                     obj._attrs = attrs
                 return attrs
-            else:
-                return None
+            return None
 
     def put(self, attr, value=True):
         self.attr_map[attr] = value
@@ -134,13 +133,12 @@ class Attributes:
     def get(self, attr, default_value=NOTHING):
         if attr in self.attr_map:
             return self.attr_map[attr]
-        elif default_value is NOTHING:
+        if default_value is NOTHING:
             raise AttributeError("No such attribute: %s" % attr)
-        else:
-            return default_value
+        return default_value
 
     def check(self, attr):
-        return True if self.get(attr, None) else False
+        return bool(self.get(attr, None))
 
     def merge(self, attr):
         self.attr_map.update(attr.attr_map)
@@ -257,31 +255,28 @@ class Namespace:
     def get_namespace(self, name=None):
         if name == Namespace.SEP or not name:
             return self
-        elif name.startswith(Namespace.SEP):
+        if name.startswith(Namespace.SEP):
             return self.get_namespace(name[1:])
-        else:
-            nodes = name.split(Namespace.SEP)
-            if nodes[0] in self.sub_namespaces:
-                return self.sub_namespaces[nodes[0]].get_namespace(
-                    Namespace.SEP.join(nodes[1:])
-                )
-            else:
-                return None
+        nodes = name.split(Namespace.SEP)
+        if nodes[0] in self.sub_namespaces:
+            return self.sub_namespaces[nodes[0]].get_namespace(
+                Namespace.SEP.join(nodes[1:])
+            )
+        return None
 
     def get_leaves(self, recursive=False, prefix=""):
         if not recursive:
             return list(self.leaves)
+        if self.name == Namespace.ROOT:
+            prefix = ""
         else:
-            if self.name == Namespace.ROOT:
-                prefix = ""
-            else:
-                prefix += self.name + Namespace.SEP
+            prefix += self.name + Namespace.SEP
 
-            leaves = []
-            leaves.extend([prefix + x for x in self.leaves])
-            for ns in self.sub_namespaces.values():
-                leaves.extend(ns.get_leaves(True, prefix))
-            return leaves
+        leaves = []
+        leaves.extend([prefix + x for x in self.leaves])
+        for ns in self.sub_namespaces.values():
+            leaves.extend(ns.get_leaves(True, prefix))
+        return leaves
 
 
 async def async_map(key, coro):
@@ -300,8 +295,7 @@ async def async_wrap(f, *args, **kwargs):
     """
     if not asyncio.iscoroutinefunction(f):
         return f(*args, **kwargs)
-    else:
-        return await f(*args, **kwargs)
+    return await f(*args, **kwargs)
 
 
 def singleton(f):
@@ -509,9 +503,8 @@ def get_injection_params(f, unbound_ctor=False):
 
     for param in params:
         if param.kind in [
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        ]:
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY]:
             if param.default != param.empty:
                 default_param_set.add(param.name)
             injection_param_names.append(param.name)
@@ -579,8 +572,7 @@ class Injector:
     def get_namespace(self, name=None):
         if name is None or name == Namespace.SEP:
             return self.ns_index
-        else:
-            return self.ns_index.get_namespace(name)
+        return self.ns_index.get_namespace(name)
 
     def add_module(self, module, skip_cycle_check=False):
         """
@@ -688,8 +680,7 @@ class Injector:
         """
         if inspect.isfunction(obj) or inspect.ismethod(obj):
             return await self._inject_method(obj, aliases, namespace)
-        else:
-            return await self._inject_instance(obj, aliases, namespace)
+        return await self._inject_instance(obj, aliases, namespace)
 
     def require(self, name, method=None):
         """
@@ -802,8 +793,7 @@ class Injector:
                 del self.singletons[resource_name]
 
     async def _bind_resource_async(
-        self, bound_method, module_aliases={}, namespace=None
-    ):
+            self, bound_method, module_aliases={}, namespace=None):
         params, _ = get_injection_params(bound_method)
         attrs = MethodAttributes.for_method(bound_method)
 
@@ -835,8 +825,7 @@ class Injector:
                     singleton = await injected_method()
                     self.singletons[name] = singleton
                     return singleton
-                else:
-                    return self.singletons[name]
+                return self.singletons[name]
 
             resource = wrapper
         else:
@@ -865,15 +854,13 @@ class Injector:
             for dep in self.dep_graph.get(resource, lambda: ())():
                 if dep in visited:
                     raise CircularDependencyError(resource, dep)
-                else:
-                    visit(dep, set(visited))
+                visit(dep, set(visited))
 
-        for resource in self.dep_graph.keys():
+        for resource, _ in self.dep_graph:
             visit(resource)
 
-    async def _resolve_dependencies(
-        self, f, unbound_ctor=False, aliases={}, namespace=""
-    ):
+    async def _resolve_dependencies(self, f, unbound_ctor=False,
+                                    aliases={}, namespace=""):
         params, default_set = get_injection_params(
             f, unbound_ctor=unbound_ctor)
         attrs = MethodAttributes.for_method(f)
@@ -964,11 +951,7 @@ class Injector:
             if method is not None:
                 raise MethodInjectionError(method, name,
                                            "Resource was not provided.")
-            else:
-                raise MissingResourceError(name)
-        else:
-            if name in self.singletons:
-                return self.singletons[name]
-            else:
-                return await async_wrap(self.resources[name])
-
+            raise MissingResourceError(name)
+        if name in self.singletons:
+            return self.singletons[name]
+        return await async_wrap(self.resources[name])
