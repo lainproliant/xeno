@@ -1,6 +1,6 @@
 # Xeno: The Python dependency injector from outer space.
 #
-# Author: Lain Supe (lainproliant)
+# Author: Lain Musgrove (lainproliant)
 # Date: Sunday, August 28th 2016
 #
 # Released under a 3-clause BSD license, see LICENSE for more info.
@@ -765,6 +765,19 @@ class Injector:
         except MissingResourceError as e:
             raise MissingDependencyError(resource_name, e.name)
 
+    def get_ordered_dependencies(self, resource_name):
+        deps, visited, stack = [], {}, [resource_name]
+
+        while stack:
+            name = stack.pop()
+            if name not in visited:
+                visited[name] = 1
+                if not name == resource_name:
+                    deps.append(name)
+                stack.extend(self.get_dependencies(name))
+
+        return deps
+
     def get_dependencies(self, resource_name):
         return self.dep_graph.get(resource_name, lambda: ())()
 
@@ -856,7 +869,7 @@ class Injector:
                     raise CircularDependencyError(resource, dep)
                 visit(dep, set(visited))
 
-        for resource, _ in self.dep_graph:
+        for resource in self.dep_graph:
             visit(resource)
 
     async def _resolve_dependencies(self, f, unbound_ctor=False,

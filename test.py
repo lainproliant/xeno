@@ -37,7 +37,7 @@ class XenoTests(unittest.TestCase):
 
             @provide
             def last_name(self):
-                return "Supe"
+                return "Musgrove"
 
         class NamePrinter:
             def __init__(self, name):
@@ -51,7 +51,7 @@ class XenoTests(unittest.TestCase):
         injector = Injector(Module())
         printer = injector.create(NamePrinter)
         self.assertEqual(printer.name, "Lain")
-        self.assertEqual(printer.last_name, "Supe")
+        self.assertEqual(printer.last_name, "Musgrove")
 
     def test_instance_injection(self):
         """Test to verify that injection on an existing instance
@@ -97,7 +97,7 @@ class XenoTests(unittest.TestCase):
 
             @provide
             def last_name(self):
-                return "Supe"
+                return "Musgrove"
 
             @provide
             def full_name(self, name, last_name):
@@ -105,7 +105,7 @@ class XenoTests(unittest.TestCase):
 
         injector = Injector(Module())
         full_name = injector.require("NamesAndStuff/full_name")
-        self.assertTrue(full_name, "Lain Supe")
+        self.assertTrue(full_name, "Lain Musgrove")
 
     def test_illegal_ctor_injection(self):
         """Test to verify that a constructor with invalid param types
@@ -136,7 +136,7 @@ class XenoTests(unittest.TestCase):
 
             @provide
             def last_name(self):
-                return "Supe"
+                return "Musgrove"
 
             @provide
             def full_name(self, *arg, name, last_name):
@@ -165,14 +165,14 @@ class XenoTests(unittest.TestCase):
                 return "Lain"
 
         class NamePrinter:
-            def __init__(self, name, last_name="Supe"):
+            def __init__(self, name, last_name="Musgrove"):
                 self.name = name
                 self.last_name = last_name
 
         injector = Injector(Module())
         printer = injector.create(NamePrinter)
         self.assertEqual(printer.name, "Lain")
-        self.assertEqual(printer.last_name, "Supe")
+        self.assertEqual(printer.last_name, "Musgrove")
 
     def test_ctor_injection_with_defaults_provided(self):
         """Test to verify that a constructor with defaults that
@@ -190,7 +190,7 @@ class XenoTests(unittest.TestCase):
                 return "Musgrove"
 
         class NamePrinter:
-            def __init__(self, name, last_name="Supe"):
+            def __init__(self, name, last_name="Musgrove"):
                 self.name = name
                 self.last_name = last_name
 
@@ -258,7 +258,7 @@ class XenoTests(unittest.TestCase):
         class Module(SubModule):
             @provide
             def last_name(self):
-                return "Supe"
+                return "Musgrove"
 
         class NamePrinter:
             def __init__(self, first_name, last_name):
@@ -269,7 +269,7 @@ class XenoTests(unittest.TestCase):
         printer = injector.create(NamePrinter)
 
         self.assertEqual(printer.first_name, "Lain")
-        self.assertEqual(printer.last_name, "Supe")
+        self.assertEqual(printer.last_name, "Musgrove")
 
     def test_injection_interceptor_for_provider(self):
         test = self
@@ -282,7 +282,7 @@ class XenoTests(unittest.TestCase):
             @provide
             def address_card(self, phone_number):
                 test.assertTrue(isinstance(phone_number, str))
-                return "Lain Supe: %s" % phone_number
+                return "Lain Musgrove: %s" % phone_number
 
         def intercept_phone_number(attrs, param_map, alias_map):
             if "phone_number" in param_map:
@@ -302,7 +302,7 @@ class XenoTests(unittest.TestCase):
             def print_address(self):
                 test.assertEqual(
                     self.address_card,
-                    "Lain Supe: 2060000000\n2000 1st Street, Seattle WA 98125",
+                    "Lain Musgrove: 2060000000\n2000 1st Street, Seattle WA 98125",
                 )
 
         injector = Injector(Module())
@@ -315,7 +315,7 @@ class XenoTests(unittest.TestCase):
         class ModuleA:
             @provide
             def really_long_name_for_a_resource_eh(self):
-                return "Lain Supe"
+                return "Lain Musgrove"
 
             @provide
             @alias("name", "really_long_name_for_a_resource_eh")
@@ -330,15 +330,15 @@ class XenoTests(unittest.TestCase):
 
         injector = Injector(ModuleA(), ModuleB())
         name = injector.require("person_name")
-        self.assertEqual(name, "Lain Supe")
+        self.assertEqual(name, "Lain Musgrove")
         special_name = injector.require("special_name")
-        self.assertTrue(special_name, "Her Majesty Princess Lain Supe")
+        self.assertTrue(special_name, "Her Majesty Princess Lain Musgrove")
 
     def test_bad_alias_loop(self):
         class ModuleA:
             @provide
             def name(self):
-                return "Lain Supe"
+                return "Lain Musgrove"
 
             @provide
             @alias("full_name", "name")
@@ -389,7 +389,7 @@ class XenoTests(unittest.TestCase):
         class ModuleA:
             @provide
             def name(self):
-                return "Lain Supe"
+                return "Lain Musgrove"
 
         @namespace("com/lainproliant/other_stuff")
         class ModuleB:
@@ -407,14 +407,14 @@ class XenoTests(unittest.TestCase):
 
         injector = Injector(ModuleA(), ModuleB(), ModuleC())
         address = injector.require("address-with-zip")
-        self.assertEqual(address, "Lain Supe: Seattle, WA 98119")
+        self.assertEqual(address, "Lain Musgrove: Seattle, WA 98119")
 
     def test_overwrite_namespaced_variable(self):
         @namespace("com/lainproliant")
         class ModuleA:
             @provide
             def name(self):
-                return "Lain Supe"
+                return "Lain Musgrove"
 
         class ModuleB:
             @provide
@@ -584,7 +584,7 @@ class XenoTests(unittest.TestCase):
 
             @provide
             def last_name(self):
-                return "Supe"
+                return "Musgrove"
 
         @namespace("B")
         class ModuleB:
@@ -731,11 +731,37 @@ class XenoTests(unittest.TestCase):
 
             @provide
             def last_name(self):
-                return "Supe"
+                return "Musgrove"
 
         injector = Injector(Core())
-        self.assertEqual("The Right Honourable Lain Supe",
+        self.assertEqual("The Right Honourable Lain Musgrove",
                          injector.require("name"))
+
+    def test_ordered_dependencies(self):
+        class Test:
+            @provide
+            def a(self):
+                pass
+
+            @provide
+            def b(self, a):
+                pass
+
+            @provide
+            def c(self, a):
+                pass
+
+            @provide
+            def d(self, b, c):
+                pass
+
+            @provide
+            def e(self, d, c, b, a):
+                pass
+
+        injector = Injector(Test())
+        self.assertListEqual(injector.get_ordered_dependencies('e'),
+                             ['a', 'b', 'c', 'd'])
 
 
 if __name__ == "__main__":

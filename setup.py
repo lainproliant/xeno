@@ -15,7 +15,7 @@ setup(
     description="The Python dependency injector from outer space.",
     long_description=long_description,
     url="https://github.com/lainproliant/xeno",
-    author="Lain Supe (lainproliant)",
+    author="Lain Musgrove (lainproliant)",
     author_email="lainproliant@gmail.com",
     license="BSD",
     classifiers=[
