@@ -6,14 +6,15 @@ from setuptools import setup, find_packages
 here = path.abspath(path.dirname(__file__))
 
 # Get the long description from the README file
-with open(path.join(here, "README.md.rst"), encoding="utf-8") as f:
+with open(path.join(here, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
 
 setup(
     name="xeno",
-    version="4.0.4",
+    version="4.1.0",
     description="The Python dependency injector from outer space.",
     long_description=long_description,
+    long_description_content_type="text/markdown",
     url="https://github.com/lainproliant/xeno",
     author="Lain Musgrove (lainproliant)",
     author_email="lainproliant@gmail.com",

@@ -81,6 +81,10 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 4.1.0: Feb 3 2020
+- Added `Injector.get_ordered_dependencies` to get a breadth first list of
+  dependencies in the order they are built.
+
 ### Version 4.0.0: May 12 2019
 ***BACKWARDS INCOMPATIBLE CHANGE***
 - Removed support for parameter annotation aliases.  Use `@alias` on methods instead.
