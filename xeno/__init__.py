@@ -556,7 +556,7 @@ class Injector:
                   More modules can be added later by calling
                   Injector.add_module().
         """
-        self.loop = asyncio.get_event_loop()
+        self.loop = asyncio.new_event_loop()
         self.resources = {"injector": lambda: self}
         self.singletons = {}
         self.dep_graph = {}
@@ -568,6 +568,9 @@ class Injector:
         for module in modules:
             self.add_module(module, skip_cycle_check=True)
         self.check_for_cycles()
+
+    def __del__(self):
+        self.loop.close()
 
     def get_namespace(self, name=None):
         if name is None or name == Namespace.SEP:
