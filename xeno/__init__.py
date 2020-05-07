@@ -35,6 +35,7 @@ __all__ = [
 ]
 
 
+from abc import ABCMeta, abstractmethod
 import asyncio
 import inspect
 
@@ -532,10 +533,13 @@ def resolve_alias(name, aliases, visited=None):
     return name
 
 
-class Injector:
+class AbstractInjector(metaclass=ABCMeta):
     """
-    An object responsible for collecting resources from modules and
-    injecting them into newly created instances.
+    This is the abstract base class for injectors.
+
+    An injector is responsible for collecting resources from modules and
+    injecting them into newly created instances and/or providing them
+    when explicitly required.
 
     An Injector is instantianted with any number of modules, which
     provide resources via methods annotated with @provide.  These
@@ -556,21 +560,16 @@ class Injector:
                   More modules can be added later by calling
                   Injector.add_module().
         """
-        self.loop = asyncio.new_event_loop()
         self.resources = {"injector": lambda: self}
         self.singletons = {}
         self.dep_graph = {}
         self.injection_interceptors = []
-        self.async_injection_interceptors = []
         self.ns_index = Namespace.root()
         self.resource_attrs = {}
 
         for module in modules:
             self.add_module(module, skip_cycle_check=True)
         self.check_for_cycles()
-
-    def __del__(self):
-        self.loop.close()
 
     def get_namespace(self, name=None):
         if name is None or name == Namespace.SEP:
@@ -611,6 +610,190 @@ class Injector:
         are invoked.
         """
         self.injection_interceptors.append(interceptor)
+
+    @abstractmethod
+    def create(self, class_):
+        """
+        Create an instance of the specified class.  The class' constructor
+        must follow the rules for @inject methods, such that all of its
+        parameters refer to injectable resources or are optional.
+
+        If the object needs to be constructed with objects not from the
+        Injector, do not use this method.  Instead, instantiate the object
+        with these parameters in the constructor, then mark one or more
+        methods with @inject and pass the instance to Injector.inject().
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def inject(self, obj, aliases={}, namespace=""):
+        """
+        Inject a method or object instance with resources from this Injector.
+
+        obj: A method or object instance.  If this is a method, all named
+             parameters are injected from the Injector.  If this is an
+             instance, its methods are scanned for injection points and these
+             methods are all invoked with resources from the Injector.
+        aliases: An optional map from dependency alias to real dependency name.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def require(self, name, method=None):
+        """
+        Require a named resource from this Injector.  If it can't be provided,
+        an InjectionError is raised.
+
+        This method should only be called from outside of the asyncio
+        event loop.
+
+        Optionally, a method can be specified.  This indicates the method that
+        requires the resource for injection, and causes this method to throw
+        MethodInjectionError instead of InjectionError if the resource was
+        not provided.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def provide(self, name, value, is_singleton=False, namespace=None):
+        raise NotImplementedError()
+
+    def has(self, name):
+        """
+        Determine if this Injector has been provided with the named resource.
+        """
+        return name in self.resources
+
+    def get_dependency_tree(self, resource_name):
+        if resource_name not in self.resources:
+            raise MissingResourceError(resource_name)
+        try:
+            return {
+                dep: self.get_dependency_tree(dep)
+                for dep in self.get_dependencies(resource_name)
+            }
+        except MissingResourceError as e:
+            raise MissingDependencyError(resource_name, e.name)
+
+    def get_dependency_graph(self, resource_name, *other_resource_names):
+        resource_names = [resource_name, *other_resource_names]
+        for name in resource_names:
+            if name not in self.resources:
+                raise MissingResourceError(name)
+        try:
+            dep_graph = {name: self.get_dependencies(name)
+                         for name in resource_names}
+            for dep in dep_graph[resource_name]:
+                dep_graph.update(self.get_dependency_graph(dep))
+            return dep_graph
+        except MissingResourceError as e:
+            raise MissingDependencyError(resource_name, e.name)
+
+    def get_ordered_dependencies(self, resource_name):
+        deps, visited, stack = [], {}, [resource_name]
+
+        while stack:
+            name = stack.pop()
+            if name not in visited:
+                visited[name] = 1
+                if not name == resource_name:
+                    deps.append(name)
+                stack.extend(self.get_dependencies(name))
+
+        return deps
+
+    def get_dependencies(self, resource_name):
+        return self.dep_graph.get(resource_name, lambda: ())()
+
+    def get_resource_attributes(self, resource_name):
+        if resource_name not in self.resource_attrs:
+            raise MissingResourceError(resource_name)
+        return self.resource_attrs[resource_name]
+
+    def scan_resources(self, filter_f):
+        for key, value in self.resource_attrs.items():
+            if filter_f(key, value):
+                yield key, value
+
+    def unbind_singleton(self, resource_name=None, unbind_all=False):
+        if unbind_all:
+            self.singletons.clear()
+        else:
+            if resource_name not in self.resources:
+                raise MissingResourceError(resource_name)
+            if not self.get_resource_attributes(resource_name).check(
+                    "singleton"):
+                raise InvalidResourceError(
+                    'Resource "%s" is not a singleton.' % resource_name
+                )
+            if resource_name in self.singletons:
+                del self.singletons[resource_name]
+
+    @abstractmethod
+    def _bind_resource(self, bound_method, module_aliases={}, namespace=None):
+        raise NotImplementedError()
+
+    def check_for_cycles(self):
+        def visit(resource, visited=None):
+            if visited is None:
+                visited = set()
+            visited.add(resource)
+            for dep in self.dep_graph.get(resource, lambda: ())():
+                if dep in visited:
+                    raise CircularDependencyError(resource, dep)
+                visit(dep, set(visited))
+
+        for resource in self.dep_graph:
+            visit(resource)
+
+    def _get_aliases(self, attrs, namespaces=[]):
+        aliases = attrs.get("aliases", {})
+        for alias in aliases.keys():
+            if Namespace.SEP in alias:
+                raise InjectionError(
+                    'Alias name may not contain the namespace '
+                    'separator: "%s"' % alias
+                )
+        using_namespaces = namespaces + attrs.get("using-namespaces", [])
+        for namespace in using_namespaces:
+            aliases = {
+                **aliases,
+                **{
+                    Namespace.leaf_name(name): name
+                    for name in self.ns_index.get_leaves(recursive=True)
+                },
+            }
+        return aliases
+
+
+class Injector(AbstractInjector):
+    """
+    A specialization of AsyncInjector, and the classic Injector
+    which supports async providers and uses an asyncio event loop
+    during dependency resolution.
+
+    Use of this injector is preferred for flexibility if you know
+    that it will not be run within an asyncio event loop.
+
+    This form of Injector cannot be used within other event loops.
+    If you wish to perform synchronous dependency injection inside
+    of an asyncio event loop, use SyncInjector instead.
+    """
+
+    def __init__(self, *modules):
+        """
+        Create an Injector object.
+
+        *modules: A list of modules to include in the injector.
+                  More modules can be added later by calling
+                  Injector.add_module().
+        """
+        super().__init__(*modules)
+        self.loop = asyncio.new_event_loop()
+        self.async_injection_interceptors = []
+
+    def __del__(self):
+        self.loop.close()
 
     def add_async_injection_interceptor(self, interceptor):
         self.async_injection_interceptors.append(interceptor)
@@ -737,77 +920,6 @@ class Injector:
             self.provide_async(name, value, is_singleton, namespace)
         )
 
-    def has(self, name):
-        """
-        Determine if this Injector has been provided with the named resource.
-        """
-        return name in self.resources
-
-    def get_dependency_tree(self, resource_name):
-        if resource_name not in self.resources:
-            raise MissingResourceError(resource_name)
-        try:
-            return {
-                dep: self.get_dependency_tree(dep)
-                for dep in self.get_dependencies(resource_name)
-            }
-        except MissingResourceError as e:
-            raise MissingDependencyError(resource_name, e.name)
-
-    def get_dependency_graph(self, resource_name, *other_resource_names):
-        resource_names = [resource_name, *other_resource_names]
-        for name in resource_names:
-            if name not in self.resources:
-                raise MissingResourceError(name)
-        try:
-            dep_graph = {name: self.get_dependencies(name)
-                         for name in resource_names}
-            for dep in dep_graph[resource_name]:
-                dep_graph.update(self.get_dependency_graph(dep))
-            return dep_graph
-        except MissingResourceError as e:
-            raise MissingDependencyError(resource_name, e.name)
-
-    def get_ordered_dependencies(self, resource_name):
-        deps, visited, stack = [], {}, [resource_name]
-
-        while stack:
-            name = stack.pop()
-            if name not in visited:
-                visited[name] = 1
-                if not name == resource_name:
-                    deps.append(name)
-                stack.extend(self.get_dependencies(name))
-
-        return deps
-
-    def get_dependencies(self, resource_name):
-        return self.dep_graph.get(resource_name, lambda: ())()
-
-    def get_resource_attributes(self, resource_name):
-        if resource_name not in self.resource_attrs:
-            raise MissingResourceError(resource_name)
-        return self.resource_attrs[resource_name]
-
-    def scan_resources(self, filter_f):
-        for key, value in self.resource_attrs.items():
-            if filter_f(key, value):
-                yield key, value
-
-    def unbind_singleton(self, resource_name=None, unbind_all=False):
-        if unbind_all:
-            self.singletons.clear()
-        else:
-            if resource_name not in self.resources:
-                raise MissingResourceError(resource_name)
-            if not self.get_resource_attributes(resource_name).check(
-                    "singleton"):
-                raise InvalidResourceError(
-                    'Resource "%s" is not a singleton.' % resource_name
-                )
-            if resource_name in self.singletons:
-                del self.singletons[resource_name]
-
     async def _bind_resource_async(
             self, bound_method, module_aliases={}, namespace=None):
         params, _ = get_injection_params(bound_method)
@@ -861,19 +973,6 @@ class Injector:
         return self.loop.run_until_complete(
             self._bind_resource_async(bound_method, module_aliases, namespace)
         )
-
-    def check_for_cycles(self):
-        def visit(resource, visited=None):
-            if visited is None:
-                visited = set()
-            visited.add(resource)
-            for dep in self.dep_graph.get(resource, lambda: ())():
-                if dep in visited:
-                    raise CircularDependencyError(resource, dep)
-                visit(dep, set(visited))
-
-        for resource in self.dep_graph:
-            visit(resource)
 
     async def _resolve_dependencies(self, f, unbound_ctor=False,
                                     aliases={}, namespace=""):
@@ -939,25 +1038,6 @@ class Injector:
             param_map = await interceptor(attrs, param_map, alias_map)
         return param_map
 
-    def _get_aliases(self, attrs, namespaces=[]):
-        aliases = attrs.get("aliases", {})
-        for alias in aliases.keys():
-            if Namespace.SEP in alias:
-                raise InjectionError(
-                    'Alias name may not contain the namespace '
-                    'separator: "%s"' % alias
-                )
-        using_namespaces = namespaces + attrs.get("using-namespaces", [])
-        for namespace in using_namespaces:
-            aliases = {
-                **aliases,
-                **{
-                    Namespace.leaf_name(name): name
-                    for name in self.ns_index.get_leaves(recursive=True)
-                },
-            }
-        return aliases
-
     async def _require_coro(self, name, method=None):
         """
         For internal use only.  Used to tie together resources needed
@@ -971,3 +1051,14 @@ class Injector:
         if name in self.singletons:
             return self.singletons[name]
         return await async_wrap(self.resources[name])
+
+
+class SyncInjector(Injector):
+    """
+    SyncInjector is a specialization of AbstractInjector that does not support
+    async providers and can be run inside another event loop.
+    """
+
+    def create(self, class_):
+        # TODO
+        pass
