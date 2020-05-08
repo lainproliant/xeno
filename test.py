@@ -1,14 +1,20 @@
 import unittest
+import asyncio
+from datetime import datetime, timedelta
 
-from xeno import (
-    CircularDependencyError, MethodAttributes, MissingResourceError,
-    provide, inject, namespace, alias, named, using, const,
-    singleton, Injector, MissingDependencyError, InjectionError,
-    InvalidResourceError
-)
+from xeno import (AsyncInjector, CircularDependencyError, InjectionError,
+                  InvalidResourceError, MethodAttributes,
+                  MissingDependencyError, MissingResourceError, SyncInjector,
+                  alias, const, inject, named, namespace, provide, singleton,
+                  using)
 
 
-class XenoTests(unittest.TestCase):
+# --------------------------------------------------------------------
+class CommonXenoTests(unittest.TestCase):
+    @classmethod
+    def make_injector(cls, *args):
+        return AsyncInjector(*args)
+
     def test_ctor_injection(self):
         """Test to verify that constructor injection works properly."""
 
@@ -21,7 +27,7 @@ class XenoTests(unittest.TestCase):
             def __init__(self, name):
                 self.name = name
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         printer = injector.create(NamePrinter)
         self.assertEqual(printer.name, "Lain")
 
@@ -48,7 +54,7 @@ class XenoTests(unittest.TestCase):
             def set_last_name(self, last_name):
                 self.last_name = last_name
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         printer = injector.create(NamePrinter)
         self.assertEqual(printer.name, "Lain")
         self.assertEqual(printer.last_name, "Musgrove")
@@ -71,7 +77,7 @@ class XenoTests(unittest.TestCase):
                 self.name = name
 
         printer = NamePrinter()
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         injector.inject(printer)
         self.assertEqual(printer.name, "Lain")
 
@@ -82,7 +88,7 @@ class XenoTests(unittest.TestCase):
             def name(self, last_name):
                 return "Lain %s" % last_name
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         with self.assertRaises(MissingDependencyError) as context:
             injector.require("MissingStuff/name")
         self.assertTrue(context.exception.name, "MissingStuff/name")
@@ -103,7 +109,7 @@ class XenoTests(unittest.TestCase):
             def full_name(self, name, last_name):
                 return "%s %s" % (name, last_name)
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         full_name = injector.require("NamesAndStuff/full_name")
         self.assertTrue(full_name, "Lain Musgrove")
 
@@ -121,7 +127,7 @@ class XenoTests(unittest.TestCase):
                 self.names = names
                 self.name = name
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         with self.assertRaises(InjectionError):
             injector.create(NamePrinter)
 
@@ -150,7 +156,7 @@ class XenoTests(unittest.TestCase):
                 print("My full name is %s" % self.full_name)
 
         with self.assertRaises(InjectionError):
-            injector = Injector(Module())
+            injector = self.make_injector(Module())
             printer = injector.create(NamePrinter)
             printer.print_name()
 
@@ -169,7 +175,7 @@ class XenoTests(unittest.TestCase):
                 self.name = name
                 self.last_name = last_name
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         printer = injector.create(NamePrinter)
         self.assertEqual(printer.name, "Lain")
         self.assertEqual(printer.last_name, "Musgrove")
@@ -194,7 +200,7 @@ class XenoTests(unittest.TestCase):
                 self.name = name
                 self.last_name = last_name
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         printer = injector.create(NamePrinter)
         self.assertEqual(printer.name, "Lain")
         self.assertEqual(printer.last_name, "Musgrove")
@@ -214,14 +220,14 @@ class XenoTests(unittest.TestCase):
                 return 1
 
         with self.assertRaises(CircularDependencyError):
-            Injector(Module())
+            self.make_injector(Module())
 
     def test_create_no_ctor(self):
         class ClassNoCtor:
             def f(self):
                 pass
 
-        Injector().create(ClassNoCtor)
+        self.make_injector().create(ClassNoCtor)
 
     def test_inject_from_subclass(self):
         class Module:
@@ -243,7 +249,7 @@ class XenoTests(unittest.TestCase):
             def inject(self, b):
                 self.b = b
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         child = injector.create(Child)
 
         self.assertEqual(child.a, 1)
@@ -265,7 +271,7 @@ class XenoTests(unittest.TestCase):
                 self.first_name = first_name
                 self.last_name = last_name
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         printer = injector.create(NamePrinter)
 
         self.assertEqual(printer.first_name, "Lain")
@@ -305,7 +311,7 @@ class XenoTests(unittest.TestCase):
                     "Lain Musgrove: 2060000000\n2000 1st Street, Seattle WA 98125",
                 )
 
-        injector = Injector(Module())
+        injector = self.make_injector(Module())
         injector.add_injection_interceptor(intercept_phone_number)
         injector.add_injection_interceptor(intercept_address_card)
         printer = injector.create(AddressPrinter)
@@ -328,7 +334,7 @@ class XenoTests(unittest.TestCase):
             def special_name(self, birth_name):
                 return "Her Majesty Princess " + birth_name
 
-        injector = Injector(ModuleA(), ModuleB())
+        injector = self.make_injector(ModuleA(), ModuleB())
         name = injector.require("person_name")
         self.assertEqual(name, "Lain Musgrove")
         special_name = injector.require("special_name")
@@ -347,7 +353,7 @@ class XenoTests(unittest.TestCase):
                 return full_name
 
         with self.assertRaises(InjectionError) as context:
-            Injector(ModuleA())
+            self.make_injector(ModuleA())
         self.assertTrue(str(context.exception).startswith(
             "Alias loop detected"))
 
@@ -365,7 +371,7 @@ class XenoTests(unittest.TestCase):
             def result(self, value):
                 return value + 1
 
-        injector = Injector(ModuleA(), ModuleB())
+        injector = self.make_injector(ModuleA(), ModuleB())
         self.assertEqual(2, injector.require("b/result"))
 
     def test_root_to_namespace_alias(self):
@@ -381,7 +387,7 @@ class XenoTests(unittest.TestCase):
             def result(self, value):
                 return value + 1
 
-        injector = Injector(ModuleA(), ModuleB())
+        injector = self.make_injector(ModuleA(), ModuleB())
         self.assertEqual(2, injector.require("result"))
 
     def test_nested_namespaces(self):
@@ -405,7 +411,7 @@ class XenoTests(unittest.TestCase):
             def address(self, address):
                 return address + " 98119"
 
-        injector = Injector(ModuleA(), ModuleB(), ModuleC())
+        injector = self.make_injector(ModuleA(), ModuleB(), ModuleC())
         address = injector.require("address-with-zip")
         self.assertEqual(address, "Lain Musgrove: Seattle, WA 98119")
 
@@ -422,7 +428,7 @@ class XenoTests(unittest.TestCase):
             def name(self):
                 return "Jenna Musgrove"
 
-        injector = Injector(ModuleA(), ModuleB())
+        injector = self.make_injector(ModuleA(), ModuleB())
         name = injector.require("com/lainproliant/name")
         self.assertEqual(name, "Jenna Musgrove")
 
@@ -441,7 +447,7 @@ class XenoTests(unittest.TestCase):
             def address(self, name, street, city, zip_code):
                 return "%s\n%s\n%s %d" % (name, street, city, zip_code)
 
-        injector = Injector(ModuleA())
+        injector = self.make_injector(ModuleA())
         address = injector.require("address")
         dep_tree = injector.get_dependency_tree("address")
         self.assertTrue("name" in dep_tree)
@@ -467,7 +473,7 @@ class XenoTests(unittest.TestCase):
             def c(self, a, b):
                 return a + b + 1
 
-        injector = Injector(ModuleA())
+        injector = self.make_injector(ModuleA())
         self.assertEqual(injector.require("a"), 3)
         self.assertEqual(injector.require("b"), 1)
         self.assertEqual(injector.require("c"), 5)
@@ -498,7 +504,7 @@ class XenoTests(unittest.TestCase):
             def c(self, a, b):
                 return a + b + 1
 
-        injector = Injector(ModuleA())
+        injector = self.make_injector(ModuleA())
         dep_graph_a = injector.get_dependency_graph("a")
         dep_graph_b = injector.get_dependency_graph("b")
         dep_graph_c = injector.get_dependency_graph("c")
@@ -525,7 +531,7 @@ class XenoTests(unittest.TestCase):
             def b(self):
                 return 0
 
-        injector = Injector(ModuleA())
+        injector = self.make_injector(ModuleA())
         self.assertTrue(injector.get_resource_attributes("a").check("singleton"))
         self.assertFalse(injector.get_resource_attributes("b").check("singleton"))
 
@@ -543,7 +549,7 @@ class XenoTests(unittest.TestCase):
             def c(self, a):
                 return str(a)
 
-        injector = Injector(ModuleA())
+        injector = self.make_injector(ModuleA())
         self.assertEqual(injector.require("a"), 2)
         self.assertEqual(injector.require("b"), 1)
         self.assertEqual(injector.require("c"), "2")
@@ -602,7 +608,7 @@ class XenoTests(unittest.TestCase):
             def first_name(self, name):
                 return name[::-1]
 
-        injector = Injector(ModuleA(), ModuleB())
+        injector = self.make_injector(ModuleA(), ModuleB())
         first_name = injector.require("A/first_name")
         last_name = injector.require("A/last_name")
         address = injector.require("B/address")
@@ -634,7 +640,7 @@ class XenoTests(unittest.TestCase):
             def e(self, b, d):
                 return 5
 
-        injector = Injector(ModuleA())
+        injector = self.make_injector(ModuleA())
         self.assertListEqual([*sorted(injector.get_dependencies("d"))],
                              ["a", "b", "c"])
         self.assertListEqual([*sorted(injector.get_dependencies("e"))],
@@ -663,7 +669,7 @@ class XenoTests(unittest.TestCase):
             def fourth_thing(self):
                 return 4
 
-        injector = Injector(Core(), Impl())
+        injector = self.make_injector(Core(), Impl())
         ns = injector.get_namespace()
         recursive_list = ns.get_leaves(recursive=True)
         core_ns = ns.get_namespace("com/example/core")
@@ -700,7 +706,7 @@ class XenoTests(unittest.TestCase):
                 )
                 return "oranges"
 
-        injector = Injector(Core())
+        injector = self.make_injector(Core())
 
         def assert_resource_name(key, attrs):
             self.assertEqual(key, attrs.get("resource-name"))
@@ -733,7 +739,7 @@ class XenoTests(unittest.TestCase):
             def last_name(self):
                 return "Musgrove"
 
-        injector = Injector(Core())
+        injector = self.make_injector(Core())
         self.assertEqual("The Right Honourable Lain Musgrove",
                          injector.require("name"))
 
@@ -759,10 +765,45 @@ class XenoTests(unittest.TestCase):
             def e(self, d, c, b, a):
                 pass
 
-        injector = Injector(Test())
+        injector = self.make_injector(Test())
         self.assertListEqual(injector.get_ordered_dependencies('e'),
                              ['a', 'b', 'c', 'd'])
 
 
+# --------------------------------------------------------------------
+class SyncXenoTests(CommonXenoTests):
+    @classmethod
+    def make_injector(cls, *args):
+        return SyncInjector(*args)
+
+
+# --------------------------------------------------------------------
+class AsyncXenoTests(unittest.TestCase):
+    def test_async_resource_concurrency(self):
+        class Test:
+            @provide
+            def target(self, a, b, c):
+                pass
+
+            @provide
+            async def a(self):
+                await asyncio.sleep(1)
+
+            @provide
+            async def b(self):
+                await asyncio.sleep(1)
+
+            @provide
+            async def c(self):
+                await asyncio.sleep(1)
+
+        injector = AsyncInjector(Test())
+        start_time = datetime.now()
+        injector.require('target')
+        end_time = datetime.now()
+        self.assertTrue(end_time - start_time < timedelta(seconds=2))
+
+
+# --------------------------------------------------------------------
 if __name__ == "__main__":
     unittest.main()

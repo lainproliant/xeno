@@ -81,6 +81,11 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 4.2.0: May 8 2020
+- Split `Injector` into `AsyncInjector` and `SyncInjector` to allow injection to be performed
+  in context of another event loop if async providers are not used.
+- Fixed `AsyncInjector` to actually support asynchronous resolution of dependencies.
+
 ### Version 4.1.0: Feb 3 2020
 - Added `Injector.get_ordered_dependencies` to get a breadth first list of
   dependencies in the order they are built.
