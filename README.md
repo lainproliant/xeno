@@ -81,6 +81,10 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 4.3.0: May 9 2020
+- Allow methods to be decorated with `@injector.provide`, eliminating the need for modules
+  in some simple usage scenarios.
+
 ### Version 4.2.0: May 8 2020
 - Split `Injector` into `AsyncInjector` and `SyncInjector` to allow injection to be performed
   in context of another event loop if async providers are not used.

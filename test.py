@@ -769,6 +769,29 @@ class CommonXenoTests(unittest.TestCase):
         self.assertListEqual(injector.get_ordered_dependencies('e'),
                              ['a', 'b', 'c', 'd'])
 
+    def test_outsider_provide(self):
+        injector = self.make_injector()
+        prov = injector.provide
+
+        @prov
+        def cheese(milk):
+            return "cheese"
+
+        @prov
+        def milk():
+            return "milk"
+
+        @prov
+        def eggs():
+            return "eggs"
+
+        @prov
+        def omelette_du_fromage(cheese, eggs):
+            return "omelette_du_fromage = %s + %s" % (cheese, eggs)
+
+        omelette = injector.require("omelette_du_fromage")
+        self.assertEqual(omelette, "omelette_du_fromage = cheese + eggs")
+
 
 # --------------------------------------------------------------------
 class SyncXenoTests(CommonXenoTests):

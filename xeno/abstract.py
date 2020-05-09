@@ -11,7 +11,7 @@
 from abc import ABCMeta, abstractmethod
 from typing import List, Set
 
-from .attributes import ClassAttributes
+from .attributes import ClassAttributes, NOTHING
 from .errors import (
     CircularDependencyError,
     InjectionError,
@@ -106,7 +106,7 @@ class AbstractInjector(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def provide(self, name, value, is_singleton=False, namespace=None):
+    def provide(self, name_or_method, value=NOTHING, is_singleton=False, namespace=None):
         raise NotImplementedError()
 
     @abstractmethod

@@ -11,21 +11,13 @@ import asyncio
 import inspect
 
 from .abstract import AbstractInjector
-from .attributes import (
-    ClassAttributes,
-    MethodAttributes,
-    get_injection_params,
-    get_injection_points,
-)
+from .attributes import (NOTHING, ClassAttributes, MethodAttributes,
+                         get_injection_params, get_injection_points)
 from .decorators import named, singleton
-from .errors import (
-    ClassInjectionError,
-    MethodInjectionError,
-    MissingDependencyError,
-    MissingResourceError,
-)
+from .errors import (ClassInjectionError, MethodInjectionError,
+                     MissingDependencyError, MissingResourceError)
 from .namespaces import Namespace
-from .utils import async_wrap, async_map, resolve_alias
+from .utils import async_map, async_wrap, resolve_alias
 
 
 # --------------------------------------------------------------------
@@ -162,7 +154,16 @@ class AsyncInjector(AbstractInjector):
         """
         return await self._require_coro(name, method)
 
-    async def provide_async(self, name, value, is_singleton=False, namespace=None):
+    async def provide_async(self, name_or_method, value=NOTHING, is_singleton=False, namespace=None):
+
+        if inspect.ismethod(name_or_method) or inspect.isfunction(name_or_method):
+            value = name_or_method
+            name = MethodAttributes.for_method(name_or_method).get('name')
+        elif value is NOTHING:
+            raise ValueError("A name and value or just a method must be provided.")
+        else:
+            name = name_or_method
+
         if name in self.singletons:
             del self.singletons[name]
         if inspect.ismethod(value) or inspect.isfunction(value):
@@ -179,13 +180,13 @@ class AsyncInjector(AbstractInjector):
                 wrapper = singleton(wrapper)
             await self._bind_resource_async(wrapper, namespace=namespace)
 
-    def provide(self, name, value, is_singleton=False, namespace=None):
+    def provide(self, name_or_method, value=NOTHING, is_singleton=False, namespace=None):
         """
         Overrides: AbstractInjector
         """
 
         return self.loop.run_until_complete(
-            self.provide_async(name, value, is_singleton, namespace)
+            self.provide_async(name_or_method, value, is_singleton, namespace)
         )
 
     async def _bind_resource_async(

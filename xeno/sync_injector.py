@@ -10,11 +10,11 @@
 import inspect
 
 from .abstract import AbstractInjector
-from .attributes import (ClassAttributes, MethodAttributes,
+from .attributes import (NOTHING, ClassAttributes, MethodAttributes,
                          get_injection_params, get_injection_points)
+from .decorators import named, singleton
 from .errors import (ClassInjectionError, MethodInjectionError,
                      MissingDependencyError, MissingResourceError)
-from .decorators import singleton, named
 from .namespaces import Namespace
 from .utils import resolve_alias
 
@@ -57,10 +57,19 @@ class SyncInjector(AbstractInjector):
         """
         return self._require(name, method)
 
-    def provide(self, name, value, is_singleton=False, namespace=None):
+    def provide(self, name_or_method, value=NOTHING, is_singleton=False, namespace=None):
         """
         Overrides: AbstractInjector
         """
+
+        if inspect.ismethod(name_or_method) or inspect.isfunction(name_or_method):
+            value = name_or_method
+            name = MethodAttributes.for_method(name_or_method).get('name')
+        elif value is NOTHING:
+            raise ValueError("A name and value or just a method must be provided.")
+        else:
+            name = name_or_method
+
         if name in self.singletons:
             del self.singletons[name]
         if inspect.ismethod(value) or inspect.isfunction(value):
