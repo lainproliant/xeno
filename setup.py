@@ -11,7 +11,7 @@ with open(path.join(here, "README.md"), encoding="utf-8") as f:
 
 setup(
     name="xeno",
-    version="4.2.0",
+    version="4.2.1",
     description="The Python dependency injector from outer space.",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -30,7 +30,7 @@ setup(
     packages=find_packages(),
     install_requires=[],
     extras_require={},
-    package_data={'xeno': ['*.pyi', 'py.typed', 'LICENSE']},
+    package_data={'xeno': ['LICENSE']},
     data_files=[],
     entry_points={"console_scripts": []},
 )
