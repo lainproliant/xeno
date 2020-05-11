@@ -9,6 +9,7 @@
 
 import asyncio
 import inspect
+from collections import defaultdict
 
 from .abstract import AbstractInjector
 from .attributes import (NOTHING, ClassAttributes, MethodAttributes,
@@ -45,6 +46,7 @@ class AsyncInjector(AbstractInjector):
         """
         self.loop = asyncio.get_event_loop()
         self.async_injection_interceptors = []
+        self.singleton_locks = defaultdict(asyncio.Lock)
         super().__init__(*modules)
 
     def add_async_injection_interceptor(self, interceptor):
@@ -216,13 +218,13 @@ class AsyncInjector(AbstractInjector):
         injected_method = await self.inject_async(bound_method, aliases, namespace)
 
         if attrs.check("singleton"):
-
             async def wrapper():
-                if name not in self.singletons:
-                    singleton = await injected_method()
-                    self.singletons[name] = singleton
-                    return singleton
-                return self.singletons[name]
+                async with self.singleton_locks[name]:
+                    if name not in self.singletons:
+                        singleton = await injected_method()
+                        self.singletons[name] = singleton
+                        return singleton
+                    return self.singletons[name]
 
             resource = wrapper
         else:
