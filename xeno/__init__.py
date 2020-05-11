@@ -36,12 +36,13 @@ __all__ = [
     "get_injection_params",
     "Injector",
     "AsyncInjector",
-    "SyncInjector"
+    "SyncInjector",
+    "NOTHING"
 ]
 
 from .attributes import (ClassAttributes, MethodAttributes,
                          get_injection_params, get_injection_points,
-                         get_providers, scan_methods)
+                         get_providers, scan_methods, NOTHING)
 from .decorators import (alias, const, inject, named, namespace, provide,
                          singleton, using)
 from .errors import (CircularDependencyError, ClassInjectionError,
