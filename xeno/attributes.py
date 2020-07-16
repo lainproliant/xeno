@@ -71,6 +71,7 @@ class ClassAttributes(Attributes):
         super().__init__()
         self.put("name", class_.__name__)
         self.put("qualname", class_.__qualname__)
+        self.put("doc", class_.__doc__)
 
 
 # --------------------------------------------------------------------
@@ -104,6 +105,7 @@ class MethodAttributes(Attributes):
         self.put("name", f.__name__)
         self.put("qualname", f.__qualname__)
         self.put("params", get_params_from_signature(f))
+        self.put("doc", f.__doc__)
 
 
 # --------------------------------------------------------------------

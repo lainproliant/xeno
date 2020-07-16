@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timedelta
 
 from xeno import (AsyncInjector, CircularDependencyError, InjectionError,
-                  InvalidResourceError, MethodAttributes,
+                  InvalidResourceError, ClassAttributes, MethodAttributes,
                   MissingDependencyError, MissingResourceError, SyncInjector,
                   alias, const, inject, named, namespace, provide, singleton,
                   using)
@@ -791,6 +791,37 @@ class CommonXenoTests(unittest.TestCase):
 
         omelette = injector.require("omelette_du_fromage")
         self.assertEqual(omelette, "omelette_du_fromage = cheese + eggs")
+
+    def test_class_attribute_docstring(self):
+        class A:
+            """This is a docstring."""
+            pass
+
+        instance = A()
+
+        attrs = ClassAttributes.for_class(A)
+        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        attrs = ClassAttributes.for_object(instance)
+        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+
+    def test_method_attribute_docstring(self):
+        class A:
+            def f(self):
+                """This is a docstring."""
+                pass
+
+        instance = A()
+
+        def bare_function():
+            """This is another doc string."""
+            pass
+
+        attrs = MethodAttributes.for_method(A.f)
+        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        attrs = MethodAttributes.for_method(instance.f)
+        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        attrs = MethodAttributes.for_method(bare_function)
+        self.assertEqual(attrs.get("doc"), "This is another doc string.")
 
 
 # --------------------------------------------------------------------
