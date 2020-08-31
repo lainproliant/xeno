@@ -196,7 +196,7 @@ class CommonXenoTests(unittest.TestCase):
                 return "Musgrove"
 
         class NamePrinter:
-            def __init__(self, name, last_name="Musgrove"):
+            def __init__(self, name, last_name="Supe"):
                 self.name = name
                 self.last_name = last_name
 
@@ -822,6 +822,25 @@ class CommonXenoTests(unittest.TestCase):
         self.assertEqual(attrs.get("doc"), "This is a docstring.")
         attrs = MethodAttributes.for_method(bare_function)
         self.assertEqual(attrs.get("doc"), "This is another doc string.")
+
+    def test_attribute_wrap_target_with_no_params(self):
+        injector = self.make_injector()
+
+        def stringify(f):
+            @MethodAttributes.wraps(f)
+            def wrapper(*args, **kwargs):
+                result = f(*args, **kwargs)
+                return str(result)
+            return wrapper
+
+        @injector.provide
+        @stringify
+        def bignum():
+            return 1234567890
+
+        value = injector.require("bignum")
+        self.assertIsInstance(value, str)
+        self.assertEqual(value, "1234567890")
 
 
 # --------------------------------------------------------------------

@@ -50,6 +50,9 @@ class Attributes:
     def check(self, attr):
         return bool(self.get(attr, None))
 
+    def has(self, attr):
+        return self.get(attr, None) is not None
+
     def merge(self, attr):
         self.attr_map.update(attr.attr_map)
         return self
@@ -133,7 +136,7 @@ def get_injection_params(f, unbound_ctor=False):
         return [], set()
 
     attr = MethodAttributes.for_method(f)
-    if attr.check("params"):
+    if attr.has("params"):
         params = attr.get("params")
     else:
         params = get_params_from_signature(f)
