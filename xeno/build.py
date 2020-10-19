@@ -1,0 +1,628 @@
+# -------------------------------------------------------------------e
+# build.py
+#
+# Author: Lain Musgrove (lain.proliant@gmail.com)
+# Date: Sunday October 18, 2020
+#
+# Distributed under terms of the MIT license.
+# --------------------------------------------------------------------
+
+import asyncio
+import atexit
+import itertools
+import multiprocessing
+import os
+import shlex
+import shutil
+import sys
+import traceback
+from argparse import ArgumentParser
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from functools import partial
+from pathlib import Path
+from typing import Any, Callable, Generic, Iterable, List, Optional, TypeVar
+
+from xeno import Injector, MethodAttributes
+from xeno.color import clreol, color, show_cursor, hide_cursor, style
+from xeno.shell import EnvDict, Shell
+from xeno.utils import async_wrap, is_iterable
+
+# --------------------------------------------------------------------
+T = TypeVar("T")
+TARGET_ATTR = "xeno.build.target"
+DEFAULT_ATTR = "xeno.build.default"
+
+# --------------------------------------------------------------------
+_error = partial(color, fg="white", bg="red")
+_info = partial(color, fg="white", render="dim")
+_ok = partial(color, fg="green")
+_start = partial(color, fg="cyan")
+_warning = partial(color, fg="red", render="dim")
+_debug = partial(color, fg="magenta", render="dim")
+
+# --------------------------------------------------------------------
+class Event(Enum):
+    CLEAN = "clean"
+    DEBUG = "debug"
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
+    START = "start"
+    SUCCESS = "success"
+
+
+# --------------------------------------------------------------------
+class Mode(Enum):
+    BUILD = "build"
+    SNIP = "snip"
+    CLEAN = "clean"
+    LIST_TARGETS = "list_targets"
+    PRINT_TREE = "print_tree"
+
+
+# --------------------------------------------------------------------
+class CleanupMode(Enum):
+    RECIPE = "recipe"
+    SHALLOW = "shallow"
+    RECURSIVE = "recursive"
+
+
+# --------------------------------------------------------------------
+@dataclass
+class EventData:
+    event: Event
+    recipe: "Recipe"
+    content: Any
+
+
+# --------------------------------------------------------------------
+EventWatcher = Callable[[EventData], None]
+
+# --------------------------------------------------------------------
+class Recipe:
+    """ A recipe represents a repeatable action which may be reversible. """
+
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        input: Optional[Iterable["Recipe"]] = None,
+        synchronous=False,
+    ):
+        self.name = name or self.__class__.__name__
+        self.inputs = list(input or [])
+        self.synchronous = synchronous
+        self.watchers: List[EventWatcher] = []
+        self.origin: Optional[str] = None
+        self.lock = asyncio.Lock()
+        self.failed = False
+
+    def watch(self, watcher: EventWatcher):
+        self.watchers.append(watcher)
+        for input in self.inputs:
+            input.watch(watcher)
+
+    def trigger(self, event: Event, content: Any = None) -> EventData:
+        event_data = EventData(event, self, content)
+        for watcher in self.watchers:
+            watcher(event_data)
+        return event_data
+
+    async def resolve(self):
+        self.failed = False
+        async with self.lock:
+            if self.done:
+                self.trigger(Event.INFO, "already resolved")
+                return
+            try:
+                assert self.ready
+                if self.synchronous:
+                    for recipe in self.inputs:
+                        await recipe.resolve()
+                else:
+                    await asyncio.gather(*(recipe.resolve() for recipe in self.inputs))
+
+                assert all(
+                    recipe.done for recipe in self.inputs
+                ), "Not all recipe inputs are done."
+                await self.make()
+                assert self.done, "Recipe is not done after make."
+                self.trigger(Event.SUCCESS)
+
+            except Exception as e:
+                self.failed = True
+                self.trigger(Event.ERROR, e)
+
+    async def spin(self, interval: float = 0.05, delay: float = 0.25):
+        if not sys.stdout.isatty():
+            return
+
+        spinner_shape = [
+            "[=   ]",
+            "[==  ]",
+            "[=== ]",
+            "[====]",
+            "[ ===]",
+            "[  ==]",
+            "[   =]",
+            "[    ]",
+        ]
+        ansi_spinner_shape = []
+
+        for shape in spinner_shape:
+            ansi_spinner_shape.append(
+                "".join([shape[0], color(shape[1:-1], fg="red", render='dim'), shape[-1]])
+            )
+
+        spinner = itertools.cycle(ansi_spinner_shape)
+        start = datetime.now()
+
+        try:
+            hide_cursor()
+            atexit.register(show_cursor)
+            while not (self.done or self.failed):
+                if datetime.now() - start > timedelta(seconds=delay):
+                    sys.stdout.write(next(spinner) + color(" resolving", render="dim"))
+                    sys.stdout.write("\r")
+                    sys.stdout.flush()
+                await asyncio.sleep(interval)
+        finally:
+            atexit.unregister(show_cursor)
+            show_cursor()
+
+    async def make(self):
+        """ Generate the final recipe result once all inputs are done. """
+        pass
+
+    async def clean(self):
+        """ Clean the final recipe result. """
+        for recipe in self.inputs:
+            await recipe.cleanup(CleanupMode.RECIPE)
+
+    async def cleanup(self, mode: CleanupMode = CleanupMode.RECURSIVE):
+        """ Cleanup the final result and all input results.  """
+        async with self.lock:
+            if mode == CleanupMode.SHALLOW:
+                await self.clean()
+                for recipe in self.inputs:
+                    await recipe.cleanup(CleanupMode.RECIPE)
+
+            elif mode == CleanupMode.RECURSIVE:
+                await self.clean()
+                for recipe in self.inputs:
+                    await recipe.cleanup(CleanupMode.RECURSIVE)
+
+            elif mode == CleanupMode.RECIPE:
+                await self.clean()
+
+            else:
+                raise ValueError("Invalid cleanup mode specified.")
+
+    @property
+    def result(self):
+        """ The result of the recipe.  Defaults to the result of all inputs. """
+        return [recipe.result for recipe in self.inputs]
+
+    @property
+    def ready(self):
+        """ Determine if prerequisites are met for this recipe. """
+        return True
+
+    @property
+    def done(self):
+        """ Whether the full result of this recipe exists. """
+        return all(recipe.done for recipe in self.inputs)
+
+    @property
+    def dirty(self):
+        """ Whether the full or partial result of this recipe exists. """
+        is_dirty = self.done or any(recipe.dirty for recipe in self.inputs)
+        if is_dirty:
+            self.trigger(Event.DEBUG, "dirty")
+        return is_dirty
+
+    def tokenize(self) -> List[str]:
+        """ Generate a list of tokens from the value for command interpolation. """
+        tokens: List[str] = []
+        if is_iterable(self.result):
+            tokens.extend(str(item) for item in self.result)
+        else:
+            tokens.append(str(self.result))
+        return tokens
+
+    def __str__(self):
+        return " ".join(shlex.quote(s) for s in self.tokenize())
+
+    def __iter__(self):
+        return iter(self.inputs)
+
+
+# --------------------------------------------------------------------
+class ValueRecipe(Recipe, Generic[T]):
+    def __init__(
+        self, name: Optional[str] = None, input: Optional[Iterable["Recipe"]] = None
+    ):
+        super().__init__(name, input)
+        self._result: Optional[T] = None
+
+    async def make(self):
+        self._result = await self.compute()
+
+    async def compute(self) -> T:
+        raise NotImplementedError()
+
+    @property
+    def result(self) -> T:
+        assert self.result is not None, "Result was not computed."
+        return self.result
+
+    @property
+    def done(self) -> bool:
+        return self.result is not None
+
+
+# --------------------------------------------------------------------
+class FileRecipe(Recipe):
+    def __init__(
+        self,
+        output: Path,
+        input: Optional[Iterable[Recipe]],
+        requires: Optional[Iterable[Path]],
+    ):
+        super().__init__(output.name, input)
+        self.output = output
+        self.requires = list(requires or [])
+
+    async def resolve(self):
+        for path in self.requires:
+            assert path.exists()
+        await super().resolve()
+
+    @property
+    def ready(self):
+        return all(path.exists() for path in self.requires)
+
+    @property
+    def done(self):
+        """ Whether the full result of this recipe exists. """
+        return self.output.exists()
+
+    @property
+    def result(self) -> Path:
+        return self.output
+
+    async def clean(self):
+        if not self.output.exists():
+            return
+
+        self.trigger(Event.CLEAN, "delete %s" % str(self.output))
+        if self.output.is_dir():
+            shutil.rmtree(self.output)
+        else:
+            self.output.unlink()
+
+    async def make(self):
+        """ Abstract method: generate the file once all inputs are done. """
+        raise NotImplementedError()
+
+
+# --------------------------------------------------------------------
+class ShellRecipeMixin(Recipe):
+    shell: Shell
+    cmd: str
+    params: EnvDict
+    require_success: bool
+    returncode: Optional[int]
+
+    def log_stdout(self, line: str, stdin: asyncio.StreamWriter):
+        self.trigger(Event.INFO, line)
+
+    def log_stderr(self, line: str, stdin: asyncio.StreamWriter):
+        self.trigger(Event.WARNING, line)
+
+    def shell_mixin_init(
+        self, cmd: str, env: Optional[EnvDict], require_success=True, **params
+    ):
+        self.shell = Shell({**os.environ, **(env or {})})
+        self.cmd = cmd
+        self.params = params
+        self.require_success = require_success
+
+    async def make(self):
+        self.trigger(
+            Event.START,
+            self.shell.interpolate(
+                self.cmd,
+                self._merge_params(),
+                {
+                    "*": partial(
+                        color, fg="blue", render="dim", after=style(render="dim")
+                    ),
+                    "output": partial(color, fg="green", after=style(render="dim")),
+                },
+            ),
+        )
+
+        self.returncode = await self.shell.run(
+            self.cmd,
+            stdout=self.log_stdout,
+            stderr=self.log_stderr,
+            **self._merge_params(),
+        )
+        assert self.returncode == 0 or not self.require_success, "Command failed."
+
+    def _merge_params(self) -> EnvDict:
+        return self.params
+
+
+# --------------------------------------------------------------------
+class ShellRecipe(ShellRecipeMixin):
+    def __init__(
+        self,
+        cmd: str,
+        env: Optional[EnvDict] = None,
+        input: Optional[Iterable[Recipe]] = None,
+        require_success=True,
+        **params,
+    ):
+        super().__init__(shlex.split(cmd)[0], input)
+        self.shell_mixin_init(cmd, env, require_success, **params)
+
+    @property
+    def done(self):
+        return (
+            self.returncode == 0
+            if self.require_success
+            else self.returncode is not None
+        )
+
+
+# --------------------------------------------------------------------
+class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
+    def __init__(
+        self,
+        cmd: str,
+        output: Path,
+        env: Optional[EnvDict] = None,
+        input: Optional[Iterable[Recipe]] = None,
+        requires: Optional[Iterable[Path]] = None,
+        require_success=True,
+        **params,
+    ):
+        super().__init__(output, input, requires)
+        self.shell_mixin_init(cmd, env, require_success, **params)
+
+    def _merge_params(self) -> EnvDict:
+        return {
+            **self.params,
+            "output": self.output,
+            "input": self.inputs,
+            "requirements": self.requires,
+        }
+
+
+# --------------------------------------------------------------------
+def sh(*args, **kwargs) -> Recipe:
+    if "output" in kwargs:
+        return ShellFileRecipe(*args, **kwargs)
+    return ShellRecipe(*args, **kwargs)
+
+
+# --------------------------------------------------------------------
+class BuildEngine:
+    def __init__(self):
+        self._injector: Optional[Injector] = None
+
+    @property
+    def injector(self) -> Injector:
+        if self._injector is None:
+            self._injector = Injector()
+        return self._injector
+
+    @property
+    def targets(self) -> List[str]:
+        return [
+            k
+            for k, v in self.injector.scan_resources(lambda k, v: v.check(TARGET_ATTR))
+        ]
+
+    @property
+    def default_target(self) -> Optional[str]:
+        results = [
+            k
+            for k, v in self.injector.scan_resources(lambda k, v: v.check(DEFAULT_ATTR))
+        ]
+        assert len(results) <= 1, "More than one default target specified."
+        return results[0] if results else None
+
+    def provide(self, f):
+        self.injector.provide(f, is_singleton=True)
+
+    def target(self, f):
+        @MethodAttributes.wraps(f)
+        async def wrapper(*args, **kwargs):
+            result = await async_wrap(f, *args, **kwargs)
+            assert result is not None, "Target definition didn't return a value."
+            if is_iterable(result):
+                results = list(result)
+                assert all(
+                    isinstance(obj, Recipe) for obj in results
+                ), "Target definition returned an iterable containing non-Recipe values."
+                result = Recipe(f.__name__, results, isinstance(result, tuple))
+            assert isinstance(
+                result, Recipe
+            ), "Target definition returned a non-Recipe value."
+            result.origin = f.__name__
+            return result
+
+        attrs = MethodAttributes.for_method(wrapper, True, True)
+        attrs.put(TARGET_ATTR)
+        self.provide(wrapper)
+        return wrapper
+
+    def default(self, f):
+        wrapper = self.target(f)
+        attrs = MethodAttributes.for_method(wrapper, True, True)
+        attrs.put(DEFAULT_ATTR)
+        return wrapper
+
+    def create(self, targets: Optional[Iterable[str]] = None):
+        targets = list(targets if targets is not None else [])
+        if not targets and self.default_target is not None:
+            targets = [self.default_target]
+        assert targets, "No targets were provided."
+        recipes = [self.injector.require(target) for target in targets]
+        assert all(
+            isinstance(obj, Recipe) for obj in recipes
+        ), "One or more target definitions returned a non-Recipe value."
+        return Recipe("build", recipes)
+
+
+# --------------------------------------------------------------------
+_engine = BuildEngine()
+provide = _engine.provide
+target = _engine.target
+default = _engine.default
+
+# --------------------------------------------------------------------
+@dataclass
+class BuildConfig:
+    name: str
+    watchers: bool
+    targets: List[str] = field(default_factory=list)
+    mode: Mode = Mode.BUILD
+    verbose: int = 0
+    debug = False
+    max_shells = multiprocessing.cpu_count()
+
+    @property
+    def parser(self) -> ArgumentParser:
+        parser = ArgumentParser(description=self.name, add_help=True)
+        parser.add_argument("targets", nargs="*")
+        parser.add_argument(
+            "--snip",
+            "-x",
+            dest="mode",
+            action="store_const",
+            const=Mode.SNIP,
+            help="Clean the specified targets.",
+        )
+        parser.add_argument(
+            "--clean",
+            "-c",
+            dest="mode",
+            action="store_const",
+            const=Mode.CLEAN,
+            help="Clean the specified targets and all of their inputs.",
+        )
+        parser.add_argument(
+            "--verbose",
+            "-v",
+            action="count",
+            help="Print stdout (-v) and/or stderr (-vv) for live running commands.",
+        )
+        parser.add_argument(
+            "--list",
+            "-l",
+            dest="mode",
+            action="store_const",
+            const=Mode.LIST_TARGETS,
+            help="List all defined targets.",
+        )
+        parser.add_argument(
+            "--debug",
+            "-D",
+            action="store_true",
+            help="Print stack traces and other diagnostic info.",
+        )
+        parser.add_argument(
+            "--max",
+            "-m",
+            dest="max_shells",
+            type=int,
+            help="Set the max number of simultaneous live commands.",
+        )
+        parser.set_defaults(mode=Mode.BUILD)
+        return parser
+
+    def parse_args(self):
+        self.parser.parse_args(namespace=self)
+        return self
+
+
+# --------------------------------------------------------------------
+def _setup_watcher(build: Recipe, config: BuildConfig):
+    def _watcher(event_data: EventData):
+        def p(tag_color, s=event_data.content, text_color=lambda s: s):
+            if sys.stdout.isatty():
+                clreol()
+            print(f"[{tag_color(event_data.recipe.name)}] {text_color(s)}")
+
+        WATCHER_EVENT_MAP = {
+            Event.CLEAN: lambda: p(_ok),
+            Event.ERROR: lambda: p(_error),
+            Event.WARNING: lambda: p(_warning, text_color=_info),
+            Event.INFO: lambda: p(_info, text_color=_info),
+            Event.START: lambda: p(_start, text_color=_info),
+            Event.SUCCESS: lambda: p(_ok, "ok"),
+        }
+
+        if config.debug:
+
+            def _debug_error():
+                p(_error)
+                if isinstance(event_data.content, Exception):
+                    traceback.print_exc()
+
+            WATCHER_EVENT_MAP[Event.ERROR] = _debug_error
+            WATCHER_EVENT_MAP[Event.DEBUG] = lambda: p(_debug)
+
+        WATCHER_EVENT_MAP.get(event_data.event, lambda: None)()
+
+    if config.watchers:
+        build.watch(_watcher)
+
+
+# --------------------------------------------------------------------
+def _print_targets(engine: BuildEngine, _):
+    if engine.default_target is not None:
+        print("%s (default)" % engine.default_target)
+    for target in engine.targets:
+        if target != engine.default_target:
+            print(target)
+
+
+# --------------------------------------------------------------------
+def _build(engine: BuildEngine, config: BuildConfig):
+    build = engine.create(config.targets)
+    _setup_watcher(build, config)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(asyncio.gather(build.resolve(), build.spin()))
+
+
+# --------------------------------------------------------------------
+def _clean(engine: BuildEngine, config: BuildConfig):
+    build = engine.create(config.targets)
+    _setup_watcher(build, config)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(
+        build.cleanup(
+            CleanupMode.RECURSIVE if config.mode == Mode.CLEAN else CleanupMode.RECIPE
+        )
+    )
+
+
+# --------------------------------------------------------------------
+BUILD_COMMAND_MAP = {
+    Mode.LIST_TARGETS: _print_targets,
+    Mode.BUILD: _build,
+    Mode.SNIP: _clean,
+    Mode.CLEAN: _clean,
+}
+
+# --------------------------------------------------------------------
+def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
+    config = BuildConfig(name, watchers).parse_args()
+    command = BUILD_COMMAND_MAP[config.mode]
+    command(engine, config)
