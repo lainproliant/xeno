@@ -10,6 +10,8 @@
 import asyncio
 import inspect
 
+from collections.abc import Sequence
+from typing import Any
 from .errors import InjectionError
 
 
@@ -61,3 +63,9 @@ def resolve_alias(name, aliases, visited=None):
         visited.add(name)
         name = resolve_alias(aliases[name], aliases, set(visited))
     return name
+
+
+# --------------------------------------------------------------------
+def is_iterable(obj: Any) -> bool:
+    """ Determine if the given object is an iterable sequence other than a string or byte array. """
+    return isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray))
