@@ -8,74 +8,105 @@
 # --------------------------------------------------------------------
 
 import asyncio
-from typing import List, Optional
+import shutil
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Union
 
-from ..utils import is_iterable
+from xeno.utils import is_iterable
 
+
+# --------------------------------------------------------------------
+EnvDict = Dict[str, Union[str, Iterable[str]]]
 
 # --------------------------------------------------------------------
 class Recipe:
     """ A recipe represents a repeatable action which may be reversible. """
 
-    def __init__(self, name: Optional[str] = None):
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        steps: Optional[Iterable["Recipe"]] = None,
+        synchronous=False,
+    ):
         self.name = name or self.__class__.__name__
+        self.steps = list(steps or [])
+        self.synchronous = synchronous
+
+    async def resolve(self):
+        if self.synchronous:
+            for step in self.steps:
+                await step.resolve()
+        else:
+            await asyncio.gather(*(step.resolve() for step in self.steps))
+
+        assert all(step.done for step in self.steps), "Not all recipe steps are done."
+        await self.make()
+        assert self.done, "Recipe is not done after make."
 
     async def make(self):
-        """ Abstract method: generate the recipe result. """
-        raise NotImplementedError()
+        """ Generate the final recipe result once all steps are done. """
+        pass
+
+    async def clean(self):
+        """ Clean the final recipe result. """
+        pass
 
     async def cleanup(self):
-        """ Cleanup the recipe result. """
-        pass
+        """ Cleanup the final result and all step results.  """
+        await self.clean()
+        for step in self.steps:
+            await step.cleanup()
 
     @property
     def result(self):
-        """ Abstract property: the result of the recipe. """
-        raise NotImplementedError()
+        """ The result of the recipe.  Defaults to the result of all steps. """
+        return [step.result for step in self.steps]
 
     @property
     def tokenize(self) -> List[str]:
         """ Generate a list of tokens from the value for command interpolation. """
+        tokens = []
         if is_iterable(self.result):
-            return list(self.result)
-        return [self.result]
+            tokens.extend(self.result)
+        else:
+            tokens.append(self.result)
+        assert all(
+            isinstance(token, str) for token in tokens
+        ), "One or more tokens are not strings."
+        return tokens
 
     @property
-    def exists(self):
+    def done(self):
         """ Whether the full result of this recipe exists. """
         return False
 
     @property
     def dirty(self):
         """ Whether the full or partial result of this recipe exists. """
-        return True
+        return self.done or any(step.dirty for step in self.steps)
 
 
 # --------------------------------------------------------------------
-class PolyRecipe(Recipe):
-    def __init__(self, members: List[Recipe], synchronous=False):
-        self._members = members
-        self._synchronous = synchronous
+class FileRecipe(Recipe):
+    def __init__(
+        self,
+        creates: Path,
+        steps: Optional[Iterable[Recipe]],
+        requires: Optional[Iterable[Path]],
+    ):
+        super().__init__(creates.name, steps)
+        self.creates = creates
+        self.requires = list(requires or [])
+
+    async def clean(self):
+        if not self.creates.exists():
+            return
+
+        if self.creates.is_dir():
+            shutil.rmtree(self.creates)
+        else:
+            self.creates.unlink()
 
     async def make(self):
-        if self._synchronous:
-            for member in self._members:
-                await member.make()
-        else:
-            await asyncio.gather(*(m.make() for m in self._members))
-
-    async def cleanup(self):
-        for member in self._members:
-            await member.cleanup()
-
-    @property
-    def result(self):
-        return [m.result for m in self._members]
-
-    @property
-    def exists(self):
-        return all(m.exists for m in self._members)
-
-    @property
-    def dirty(self):
-        return any(m.dirty for m in self._members)
+        """ Abstract method: generate the file once all steps are done. """
+        raise NotImplementedError()
