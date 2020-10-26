@@ -9,11 +9,10 @@
 
 import asyncio
 import inspect
-
 from collections.abc import Sequence
 from typing import Any
-from .errors import InjectionError
 
+from .errors import InjectionError
 
 # --------------------------------------------------------------------
 async def async_map(key, coro):
@@ -42,12 +41,26 @@ def bind_unbound_method(obj, method):
 
 
 # --------------------------------------------------------------------
+def decode(b: bytes) -> str:
+    try:
+        return b.decode("utf-8")
+    except UnicodeDecodeError:
+        return b.decode("ISO-8859-1")
+
+
+# --------------------------------------------------------------------
 def get_params_from_signature(f):
     """
     Fetches the params tuple list from the given function's signature.
     """
     sig = inspect.signature(f)
     return list(sig.parameters.values())
+
+
+# --------------------------------------------------------------------
+def is_iterable(obj: Any) -> bool:
+    """ Determine if the given object is an iterable sequence other than a string or byte array. """
+    return isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray))
 
 
 # --------------------------------------------------------------------
@@ -63,9 +76,3 @@ def resolve_alias(name, aliases, visited=None):
         visited.add(name)
         name = resolve_alias(aliases[name], aliases, set(visited))
     return name
-
-
-# --------------------------------------------------------------------
-def is_iterable(obj: Any) -> bool:
-    """ Determine if the given object is an iterable sequence other than a string or byte array. """
-    return isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray))
