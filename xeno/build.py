@@ -8,18 +8,18 @@
 # --------------------------------------------------------------------
 
 import asyncio
+import multiprocessing
 import os
 import shlex
 import shutil
-import multiprocessing
-
 from argparse import ArgumentParser
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, List, Optional
 
 from xeno import Injector, MethodAttributes
+from xeno.color import color
 from xeno.shell import EnvDict, Shell
 from xeno.utils import async_wrap, is_iterable
 
@@ -28,14 +28,21 @@ TARGET_ATTR = "xeno.build.target"
 DEFAULT_ATTR = "xeno.build.default"
 
 # --------------------------------------------------------------------
+_error = color(fg="red")
+_info = color(fg="white", style="dim")
+_ok = color(fg="green")
+_start = color(fg="cyan")
+_warning = color(fg="yellow")
+
+# --------------------------------------------------------------------
 class Event(Enum):
-    START = "start"
-    INFO = "info"
+    CLEAN = "clean"
+    CLEANING = "cleaning"
     ERROR = "error"
     FAILURE = "failure"
+    INFO = "info"
+    START = "start"
     SUCCESS = "success"
-    CLEANING = "cleaning"
-    CLEAN = "clean"
 
 
 # --------------------------------------------------------------------
@@ -45,6 +52,7 @@ class Mode(Enum):
     PURGE = "purge"
     LIST_TARGETS = "list_targets"
     PRINT_TREE = "print_tree"
+
 
 # --------------------------------------------------------------------
 class CleanupMode(Enum):
@@ -119,7 +127,8 @@ class Recipe:
 
     async def clean(self):
         """ Clean the final recipe result. """
-        pass
+        for recipe in self.inputs:
+            await recipe.cleanup(CleanupMode.RECIPE)
 
     async def cleanup(self, mode: CleanupMode = CleanupMode.RECURSIVE):
         """ Cleanup the final result and all input results.  """
@@ -246,7 +255,7 @@ class ShellRecipeMixin:
             self.cmd,
             stdout=ShellFileRecipe.log_stdout,
             stderr=ShellFileRecipe.log_stderr,
-            **self._merge_params()
+            **self._merge_params(),
         )
         assert self.returncode == 0 or not self.require_success, "Command failed."
 
@@ -262,7 +271,7 @@ class ShellRecipe(Recipe, ShellRecipeMixin):
         env: Optional[EnvDict],
         input: Optional[Iterable[Recipe]],
         require_success=True,
-        **params
+        **params,
     ):
         super().__init__(shlex.split(cmd)[0], input)
         self.shell_mixin_init(cmd, env, require_success, **params)
@@ -286,7 +295,7 @@ class ShellFileRecipe(FileRecipe, ShellRecipeMixin):
         input: Optional[Iterable[Recipe]],
         requires: Optional[Iterable[Path]],
         require_success=True,
-        **params
+        **params,
     ):
         super().__init__(output, input, requires)
         self.shell_mixin_init(cmd, env, require_success, **params)
@@ -363,13 +372,15 @@ class BuildEngine:
         attrs.put(DEFAULT_ATTR)
         return wrapper
 
-    def __call__(self, targets: Optional[Iterable[str]] = None):
+    def create(self, targets: Optional[Iterable[str]] = None):
         targets = list(targets if targets is not None else [])
+        assert targets, "No targets were provided."
         recipes = [self.injector.require(target) for target in targets]
         assert all(
             isinstance(obj, Recipe) for obj in recipes
         ), "One or more target definitions returned a non-Recipe value."
         return Recipe("build", recipes)
+
 
 # --------------------------------------------------------------------
 _engine = BuildEngine()
@@ -378,23 +389,140 @@ target = _engine.target
 default = _engine.default
 
 # --------------------------------------------------------------------
-def build(*, engine: BuildEngine = _engine, name="xeno.build script"):
-    parser = ArgumentParser(description=name, add_help=True)
-    parser.add_argument("targets", nargs="*", default=None)
-    parser.add_argument("--clean", "-c", dest="mode", action="store_const", const=Mode.CLEAN,
-                        help="Clean the specified targets.")
-    parser.add_argument("--purge", "-x", dest="mode", action="store_const", const=Mode.PURGE,
-                        help="Clean the specified targets and all of their inputs.")
-    parser.add_argument("--verbose", "-v", action="count", default=0,
-                        help="Print stdout (-v) and/or stderr (-vv) for live running commands.")
-    parser.add_argument("--list", "-l", dest="mode", action="store_const", const=Mode.LIST_TARGETS,
-                        help="List all defined targets.")
-    parser.add_argument("--debug", "-D", action="store_true",
-                        help="Print stack traces and other diagnostic info.")
-    parser.add_argument("--max", "-m", type=int, default=multiprocessing.cpu_count(),
-                        help="Set the max number of simultaneous live commands.")
-    parser.set_defaults(mode=Mode.BUILD)
+@dataclass
+class BuildConfig:
+    name: str
+    watchers: bool
+    targets: List[str] = field(default_factory=list)
+    mode: Mode = Mode.BUILD
+    verbose: int = 0
+    debug = False
+    max_shells = multiprocessing.cpu_count()
 
-    args = parser.parse_args()
+    @property
+    def parser(self) -> ArgumentParser:
+        parser = ArgumentParser(description=self.name, add_help=True)
+        parser.add_argument("targets", nargs="*")
+        parser.add_argument(
+            "--clean",
+            "-c",
+            dest="mode",
+            action="store_const",
+            const=Mode.CLEAN,
+            help="Clean the specified targets.",
+        )
+        parser.add_argument(
+            "--purge",
+            "-x",
+            dest="mode",
+            action="store_const",
+            const=Mode.PURGE,
+            help="Clean the specified targets and all of their inputs.",
+        )
+        parser.add_argument(
+            "--verbose",
+            "-v",
+            action="count",
+            help="Print stdout (-v) and/or stderr (-vv) for live running commands.",
+        )
+        parser.add_argument(
+            "--list",
+            "-l",
+            dest="mode",
+            action="store_const",
+            const=Mode.LIST_TARGETS,
+            help="List all defined targets.",
+        )
+        parser.add_argument(
+            "--debug",
+            "-D",
+            action="store_true",
+            help="Print stack traces and other diagnostic info.",
+        )
+        parser.add_argument(
+            "--max",
+            "-m",
+            dest="max_shells",
+            type=int,
+            help="Set the max number of simultaneous live commands.",
+        )
+        parser.set_defaults(mode=Mode.BUILD)
+        return parser
 
-    if args.mode == Mode.LIST_TARGETS:
+    def parse_args(self):
+        self.parser.parse_args(namespace=self)
+        return self
+
+
+# --------------------------------------------------------------------
+def _print_targets(engine: BuildEngine, _):
+    if engine.default_target is not None:
+        print("%s (default)" % engine.default_target)
+    for target in engine.targets:
+        if target != engine.default_target:
+            print(target)
+
+
+# --------------------------------------------------------------------
+def _build(engine: BuildEngine, config: BuildConfig):
+    build = engine.create(config.targets or engine.default_target)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(build.resolve())
+
+
+# --------------------------------------------------------------------
+def _setup_watcher(build: Recipe, config: BuildConfig):
+    def _watcher(event_data: EventData):
+        def p(tag_color, s=event_data.content, text_color=lambda s: s):
+            print(f"[{tag_color(event_data.recipe.name)}] {text_color(s)}")
+
+        if event_data.event == Event.CLEAN:
+            p(_ok, "clean ok")
+
+        elif event_data.event == Event.CLEANING:
+            p(_start, "clean start")
+
+        elif event_data.event == Event.ERROR:
+            p(_error)
+
+        elif event_data.event == Event.FAILURE:
+            p(_error, "fail", _error)
+
+        elif event_data.event == Event.INFO:
+            p(_info, text_color=_info)
+
+        elif event_data.event == Event.START:
+            p(_start, "start")
+
+        elif event_data.event == Event.SUCCESS:
+            p(_ok, "ok")
+
+    if config.watchers:
+        build.watch(_watcher)
+
+
+# --------------------------------------------------------------------
+def _clean(engine: BuildEngine, config: BuildConfig):
+    build = engine.create(config.targets or engine.default_target)
+    _setup_watcher(build, config)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(
+        build.cleanup(
+            CleanupMode.RECURSIVE if config.mode == Mode.PURGE else CleanupMode.RECIPE
+        )
+    )
+
+
+# --------------------------------------------------------------------
+BUILD_COMMAND_MAP = {
+    Mode.LIST_TARGETS: _print_targets,
+    Mode.BUILD: _build,
+    Mode.CLEAN: _clean,
+    Mode.PURGE: _clean,
+}
+
+# --------------------------------------------------------------------
+def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
+    config = BuildConfig(name, watchers).parse_args()
+    command = BUILD_COMMAND_MAP[config.mode]
+    command(engine, config)
