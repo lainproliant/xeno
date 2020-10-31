@@ -476,26 +476,17 @@ def _setup_watcher(build: Recipe, config: BuildConfig):
         def p(tag_color, s=event_data.content, text_color=lambda s: s):
             print(f"[{tag_color(event_data.recipe.name)}] {text_color(s)}")
 
-        if event_data.event == Event.CLEAN:
-            p(_ok, "clean ok")
+        WATCHER_EVENT_MAP = {
+            Event.CLEAN: lambda: p(_ok, "clean ok"),
+            Event.CLEANING: lambda: p(_start, "clean start"),
+            Event.ERROR: lambda: p(_error),
+            Event.FAILURE: lambda: p(_error, "fail", _error),
+            Event.INFO: lambda: p(_info, text_color=_info),
+            Event.START: lambda: p(_start, "start"),
+            Event.SUCCESS: lambda: p(_ok, "ok"),
+        }
 
-        elif event_data.event == Event.CLEANING:
-            p(_start, "clean start")
-
-        elif event_data.event == Event.ERROR:
-            p(_error)
-
-        elif event_data.event == Event.FAILURE:
-            p(_error, "fail", _error)
-
-        elif event_data.event == Event.INFO:
-            p(_info, text_color=_info)
-
-        elif event_data.event == Event.START:
-            p(_start, "start")
-
-        elif event_data.event == Event.SUCCESS:
-            p(_ok, "ok")
+        WATCHER_EVENT_MAP[event_data.event]()
 
     if config.watchers:
         build.watch(_watcher)
