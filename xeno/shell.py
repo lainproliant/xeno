@@ -74,17 +74,21 @@ class Shell:
         )
 
     def _interact(self, cmd: str, check: bool) -> int:
-        returncode = subprocess.call(
-            cmd,
-            env=self._env,
-            cwd=self._cwd,
-            shell=True
-        )
+        returncode = subprocess.call(cmd, env=self._env, cwd=self._cwd, shell=True)
         assert not check or returncode == 0, "Command failed."
         return returncode
 
-    def _interpolate_cmd(self, cmd: str, params: EnvDict) -> str:
-        return cmd.format(**self._env, **(digest_params(params)))
+    def interpolate(
+        self, cmd: str, params: EnvDict, wrappers: Dict[str, Callable[[str], str]] = {}
+    ) -> str:
+        digested_params = {
+            k: wrappers[k](v) if k in wrappers else (
+                wrappers["*"](v) if "*" in wrappers else v
+            )
+            for k, v in digest_params(params).items()
+        }
+
+        return cmd.format(**self._env, **digested_params)
 
     async def run(
         self,
@@ -101,7 +105,7 @@ class Shell:
         def setup_rl_task(stream: asyncio.StreamReader, sink: LineSink):
             rl_tasks[asyncio.Task(stream.readline())] = (stream, sink)
 
-        cmd = self._interpolate_cmd(cmd, params)
+        cmd = self.interpolate(cmd, params)
         proc = await self._create_proc(cmd)
         assert proc.stdout is not None
         assert proc.stderr is not None
@@ -141,8 +145,10 @@ class Shell:
         **params
     ) -> int:
         loop = asyncio.get_event_loop()
-        return loop.run_until_complete(self.run(cmd, stdin, stdout, stderr, check, **params))
+        return loop.run_until_complete(
+            self.run(cmd, stdin, stdout, stderr, check, **params)
+        )
 
     def interact(self, cmd: str, check=False, **params) -> int:
-        cmd = self._interpolate_cmd(cmd, params)
+        cmd = self.interpolate(cmd, params)
         return self._interact(cmd, check)

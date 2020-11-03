@@ -81,6 +81,10 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 4.4.0: Nov 2 2020
+- Added experimental `xeno.build` module, a declarative build system driven by IOC.
+- Added `xeno.color` offering basic ANSI color and terminal control.
+
 ### Version 4.3.0: May 9 2020
 - Allow methods to be decorated with `@injector.provide`, eliminating the need for modules
   in some simple usage scenarios.

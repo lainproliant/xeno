@@ -14,6 +14,7 @@ from typing import Any
 
 from .errors import InjectionError
 
+
 # --------------------------------------------------------------------
 async def async_map(key, coro):
     """
