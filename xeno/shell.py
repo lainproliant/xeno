@@ -7,14 +7,14 @@
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
 
-import os
 import asyncio
+import os
 import shlex
 import subprocess
-from typing import Any, Callable, Dict, Optional, Tuple
 from pathlib import Path
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 
-from xeno.utils import is_iterable, decode
+from xeno.utils import decode, is_iterable
 
 # --------------------------------------------------------------------
 EnvDict = Dict[str, Any]
@@ -79,16 +79,25 @@ class Shell:
         return returncode
 
     def interpolate(
-        self, cmd: str, params: EnvDict, wrappers: Dict[str, Callable[[str], str]] = {}
+        self,
+        cmd: str,
+        params: EnvDict,
+        wrappers: Dict[str, Callable[[str], str]] = {},
+        redacted: Set[str] = set(),
     ) -> str:
         digested_params = {
-            k: wrappers[k](v) if k in wrappers else (
-                wrappers["*"](v) if "*" in wrappers else v
-            )
+            k: wrappers[k](v)
+            if k in wrappers
+            else (wrappers["*"](v) if "*" in wrappers else v)
             for k, v in digest_params(params).items()
         }
 
-        return cmd.format(**self._env, **digested_params)
+        redacted_params = {
+            k: v if k not in redacted else "<redacted>"
+            for k, v in digested_params.items()
+        }
+
+        return cmd.format(**self._env, **redacted_params)
 
     async def run(
         self,
