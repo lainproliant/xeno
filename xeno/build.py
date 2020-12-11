@@ -22,8 +22,19 @@ from datetime import datetime, timedelta
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import (Any, Callable, Dict, Generator, Generic, Iterable, List,
-                    Optional, Set, TypeVar, Union)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    Generic,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    TypeVar,
+    Union,
+)
 
 from xeno import Injector, MethodAttributes
 from xeno.color import clreol, color, hide_cursor, show_cursor, style
@@ -228,12 +239,18 @@ class Recipe:
     @property
     def done(self):
         """ Whether the full result of this recipe exists. """
-        return all(recipe.done for recipe in self.inputs)
+        return all(recipe.done for recipe in self.inputs) and not self.dirty
 
     @property
     def dirty(self):
         """ Whether the full or partial result of this recipe exists. """
-        return self.done or any(recipe.dirty for recipe in self.inputs)
+        return self.age > max(recipe.age for recipe in self.inputs) or any(
+            recipe.dirty for recipe in self.inputs
+        )
+
+    @property
+    def age(self) -> timedelta:
+        return timedelta.min
 
     def tokenize(self) -> List[str]:
         """ Generate a list of tokens from the value for command interpolation. """
@@ -302,6 +319,20 @@ class FileRecipe(Recipe):
         return self.output.exists()
 
     @property
+    def dirty(self):
+        now = datetime.now()
+        # type: ignore
+        return Recipe.dirty.fget(self) or self.age > max(
+            now - datetime.fromtimestamp(req.stat().st_mtime)
+            for req in self.requires)
+
+    @property
+    def age(self) -> timedelta:
+        if not self.output.exists():
+            return timedelta.max
+        return datetime.now() - datetime.fromtimestamp(self.output.stat().st_mtime)
+
+    @property
     def result(self) -> Path:
         return self.output
 
@@ -368,7 +399,7 @@ class ShellRecipeMixin(Recipe):
                     ),
                     "output": partial(color, fg="green", after=style(render="dim")),
                 },
-                self.redacted
+                self.redacted,
             ),
         )
 
@@ -402,7 +433,9 @@ class ShellRecipe(ShellRecipeMixin):
         **params,
     ):
         super().__init__(shlex.split(cmd)[0], Recipe.suss(params))
-        self.shell_mixin_init(cmd, env, cwd, redacted, require_success, interactive, **params)
+        self.shell_mixin_init(
+            cmd, env, cwd, redacted, require_success, interactive, **params
+        )
 
     @property
     def done(self):
@@ -428,7 +461,9 @@ class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
         **params,
     ):
         super().__init__(output, Recipe.suss(params), requires)
-        self.shell_mixin_init(cmd, env, cwd, redacted, require_success, interactive, **params)
+        self.shell_mixin_init(
+            cmd, env, cwd, redacted, require_success, interactive, **params
+        )
 
     def _merge_params(self) -> EnvDict:
         return {
