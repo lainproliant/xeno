@@ -39,7 +39,7 @@ from typing import (
 from xeno import Injector, MethodAttributes
 from xeno.color import clreol, color, hide_cursor, show_cursor, style
 from xeno.shell import EnvDict, Shell
-from xeno.utils import async_wrap, is_iterable
+from xeno.utils import async_wrap, is_iterable, file_age
 
 # --------------------------------------------------------------------
 T = TypeVar("T")
@@ -105,6 +105,8 @@ class Recipe:
                 yield from [obj for obj in v if isinstance(obj, Recipe)]
             elif isinstance(v, Recipe):
                 yield v
+            elif isinstance(v, Path):
+                yield StaticFileRecipe(v)
 
     def __init__(
         self,
@@ -138,7 +140,7 @@ class Recipe:
     async def resolve(self):
         self.failed = False
         async with self.lock:
-            if self.done:
+            if self.done and not self.outdated:
                 return
             try:
                 assert self.ready
@@ -152,7 +154,12 @@ class Recipe:
                     recipe.done for recipe in self.inputs
                 ), "Some recipes didn't complete successfully."
                 await self.make()
-                assert self.done, "Recipe is not done after make."
+                assert self.done, "Recipe '%s' is not done after make." % self.name
+                if self.outdated:
+                    self.trigger(
+                        Event.WARNING,
+                        "Recipe '%s' is out of date after make." % self.name,
+                    )
                 self.trigger(Event.SUCCESS)
 
             except Exception as e:
@@ -237,20 +244,27 @@ class Recipe:
         return True
 
     @property
-    def done(self):
-        """ Whether the full result of this recipe exists. """
-        return all(recipe.done for recipe in self.inputs) and not self.dirty
+    def min_input_age(self):
+        return min(r.age for r in self.inputs) if self.inputs else timedelta.max
 
     @property
-    def dirty(self):
-        """ Whether the full or partial result of this recipe exists. """
-        return self.age > max(recipe.age for recipe in self.inputs) or any(
-            recipe.dirty for recipe in self.inputs
-        )
+    def inputs_outdated(self):
+        return any(r.outdated for r in self.inputs)
+
+    @property
+    def outdated(self):
+        return self.inputs_outdated
+
+    @property
+    def done(self):
+        """ Whether the full result of this recipe exists. """
+        return all(recipe.done for recipe in self.inputs)
 
     @property
     def age(self) -> timedelta:
-        return timedelta.min
+        if not self.inputs:
+            raise NotImplementedError()
+        return min(r.age for r in self.inputs)
 
     def tokenize(self) -> List[str]:
         """ Generate a list of tokens from the value for command interpolation. """
@@ -297,8 +311,8 @@ class FileRecipe(Recipe):
     def __init__(
         self,
         output: Union[str, Path],
-        input: Optional[Iterable[Recipe]],
-        requires: Optional[Iterable[Path]],
+        input: Optional[Iterable[Recipe]] = None,
+        requires: Optional[Iterable[Path]] = None,
     ):
         super().__init__(Path(output).name, input)
         self.output = Path(output)
@@ -319,18 +333,24 @@ class FileRecipe(Recipe):
         return self.output.exists()
 
     @property
-    def dirty(self):
-        now = datetime.now()
-        # type: ignore
-        return Recipe.dirty.fget(self) or self.age > max(
-            now - datetime.fromtimestamp(req.stat().st_mtime)
-            for req in self.requires)
-
-    @property
     def age(self) -> timedelta:
         if not self.output.exists():
             return timedelta.max
         return datetime.now() - datetime.fromtimestamp(self.output.stat().st_mtime)
+
+    @property
+    def min_require_age(self) -> timedelta:
+        return (
+            min(file_age(f) for f in self.requires) if self.requires else timedelta.max
+        )
+
+    @property
+    def outdated(self) -> bool:
+        return (
+            self.inputs_outdated
+            or self.age > self.min_input_age
+            or self.age > self.min_require_age
+        )
 
     @property
     def result(self) -> Path:
@@ -349,6 +369,23 @@ class FileRecipe(Recipe):
     async def make(self):
         """ Abstract method: generate the file once all inputs are done. """
         raise NotImplementedError()
+
+
+# --------------------------------------------------------------------
+class StaticFileRecipe(FileRecipe):
+    def __init__(self, static_file: Union[str, Path]):
+        super().__init__(Path(static_file).name, [])
+        self.output = Path(static_file)
+
+    async def resolve(self):
+        assert self.output.exists()
+
+    async def clean(self):
+        pass
+
+    @property
+    def outdated(self):
+        return False
 
 
 # --------------------------------------------------------------------
@@ -436,6 +473,9 @@ class ShellRecipe(ShellRecipeMixin):
         self.shell_mixin_init(
             cmd, env, cwd, redacted, require_success, interactive, **params
         )
+        self.name = Path(
+            shlex.split(self.shell.interpolate(cmd, self._merge_params()))[0]
+        ).stem
 
     @property
     def done(self):
@@ -514,16 +554,28 @@ class BuildEngine:
         @MethodAttributes.wraps(f)
         async def wrapper(*args, **kwargs):
             result = await async_wrap(f, *args, **kwargs)
-            assert result is not None, "Target definition didn't return a value."
+            assert result is not None, (
+                "Target definition for '%s' didn't return a value." % f.__name__
+            )
             if is_iterable(result):
                 results = list(result)
                 assert all(
                     isinstance(obj, Recipe) for obj in results
-                ), "Target definition returned an iterable containing non-Recipe values."
+                ), "Target definition for '%s' returned an iterable containing non-Recipe values (e.g. '%s')." % (
+                    f.__name__,
+                    next(
+                        type(obj).__qualname__
+                        for obj in result
+                        if not isinstance(obj, Recipe)
+                    ),
+                )
                 result = Recipe(f.__name__, results, isinstance(result, tuple))
             assert isinstance(
                 result, Recipe
-            ), "Target definition returned a non-Recipe value."
+            ), "Target definition for '%s' returned a non-Recipe value ('%s')." % (
+                f.__name__,
+                type(result).__qualname__,
+            )
             result.origin = f.__name__
             return result
 
@@ -715,6 +767,9 @@ BUILD_COMMAND_MAP = {
 
 # --------------------------------------------------------------------
 def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
-    config = BuildConfig(name, watchers).parse_args()
-    command = BUILD_COMMAND_MAP[config.mode]
-    command(engine, config)
+    try:
+        config = BuildConfig(name, watchers).parse_args()
+        command = BUILD_COMMAND_MAP[config.mode]
+        command(engine, config)
+    except AssertionError as e:
+        print(f"[{color('SCRIPT ERROR', bg='red', fg='white')}] {e}")

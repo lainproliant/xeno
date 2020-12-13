@@ -10,6 +10,8 @@
 import asyncio
 import inspect
 from collections.abc import Sequence
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from .errors import InjectionError
@@ -63,6 +65,12 @@ def is_iterable(obj: Any) -> bool:
     """ Determine if the given object is an iterable sequence other than a string or byte array. """
     return isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray))
 
+
+# --------------------------------------------------------------------
+def file_age(file: Path) -> timedelta:
+    return datetime.now() - datetime.fromtimestamp(
+        file.stat().st_mtime
+    )
 
 # --------------------------------------------------------------------
 def resolve_alias(name, aliases, visited=None):
