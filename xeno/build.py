@@ -98,15 +98,27 @@ class Recipe:
     """ A recipe represents a repeatable action which may be reversible. """
 
     @staticmethod
+    def suss_one(param: Any) -> Optional["Recipe"]:
+        if isinstance(param, Recipe):
+            return param
+        elif isinstance(param, Path):
+            return StaticFileRecipe(param)
+        else:
+            return None
+
+    @staticmethod
     def suss(params: Dict[str, Any]) -> Generator["Recipe", None, None]:
         """ Suss out any recipes from the given dictionary values. """
         for k, v in params.items():
             if is_iterable(v):
-                yield from [obj for obj in v if isinstance(obj, Recipe)]
-            elif isinstance(v, Recipe):
-                yield v
-            elif isinstance(v, Path):
-                yield StaticFileRecipe(v)
+                for x in v:
+                    sussed = Recipe.suss_one(v)
+                    if isinstance(sussed, Recipe):
+                        yield sussed
+            else:
+                sussed = Recipe.suss_one(v)
+                if isinstance(sussed, Recipe):
+                    yield sussed
 
     def __init__(
         self,
