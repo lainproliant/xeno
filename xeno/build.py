@@ -781,7 +781,7 @@ BUILD_COMMAND_MAP = {
 def recipe(f):
     def wrapper(*args, **kwargs):
         recipe = f(*args, **kwargs)
-        recipe.name = f"{f.__name__}: {recipe.name}"
+        recipe.name = f"{f.__name__}:{recipe.name}"
         return recipe
     return wrapper
 
