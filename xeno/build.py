@@ -163,7 +163,7 @@ class Recipe:
                     await asyncio.gather(*(recipe.resolve() for recipe in self.inputs))
 
                 assert all(
-                    recipe.done for recipe in self.inputs
+                    recipe.done and not recipe.outdated for recipe in self.inputs
                 ), "Some recipes didn't complete successfully."
                 await self.make()
                 assert self.done, "Recipe '%s' is not done after make." % self.name
@@ -176,7 +176,7 @@ class Recipe:
 
             except Exception as e:
                 self.failed = True
-                self.trigger(Event.ERROR, e)
+                self.trigger(Event.ERROR, "fail")
 
     async def spin(self, interval: float = 0.05, delay: float = 0.25):
         if not sys.stdout.isatty():
@@ -776,6 +776,14 @@ BUILD_COMMAND_MAP = {
     Mode.SNIP: _clean,
     Mode.CLEAN: _clean,
 }
+
+# --------------------------------------------------------------------
+def recipe(f):
+    def wrapper(*args, **kwargs):
+        recipe = f(*args, **kwargs)
+        recipe.name = f"{f.__name__}: {recipe.name}"
+        return recipe
+    return wrapper
 
 # --------------------------------------------------------------------
 def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):

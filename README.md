@@ -81,6 +81,10 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 4.7.0: Dec 16 2020
+- Fixed a bug where build would continue resolving with outdated results.
+- Added `@recipe` decorator to `xeno.build` to denote recipe functions.
+
 ### Version 4.4.0: Nov 2 2020
 - Added experimental `xeno.build` module, a declarative build system driven by IOC.
 - Added `xeno.color` offering basic ANSI color and terminal control.

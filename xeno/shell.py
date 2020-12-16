@@ -135,12 +135,13 @@ class Shell:
                 stream, sink = rl_tasks.pop(future)
                 line = future.result()
                 if line:
-                    line = decode(line).strip()
+                    line = decode(line).rstrip()
                     assert proc.stdin is not None
                     sink(line, proc.stdin)
                     setup_rl_task(stream, sink)
 
         await proc.wait()
+        assert proc.returncode is not None, "proc.returncode is None"
         assert not check or proc.returncode == 0, "Command failed."
         return proc.returncode
 
