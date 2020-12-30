@@ -81,6 +81,10 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 4.8.0: Dec 29 2020
+- All recipe resources are loaded before targets are determined.
+- Recipe names are now valid targets for a build.
+
 ### Version 4.7.0: Dec 16 2020
 - Fixed a bug where build would continue resolving with outdated results.
 - Added `@recipe` decorator to `xeno.build` to denote recipe functions.

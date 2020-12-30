@@ -39,7 +39,7 @@ from typing import (
 from xeno import Injector, MethodAttributes
 from xeno.color import clreol, color, hide_cursor, show_cursor, style
 from xeno.shell import EnvDict, Shell
-from xeno.utils import async_wrap, is_iterable, file_age
+from xeno.utils import async_wrap, file_age, is_iterable
 
 # --------------------------------------------------------------------
 T = TypeVar("T")
@@ -133,6 +133,7 @@ class Recipe:
         self.origin: Optional[str] = None
         self.lock = asyncio.Lock()
         self.failed = False
+        self.hide = False
 
     def named(self, name: str) -> "Recipe":
         self.name = name
@@ -301,6 +302,7 @@ class ValueRecipe(Recipe, Generic[T]):
     ):
         super().__init__(name, input)
         self._result: Optional[T] = None
+        self.hide = True
 
     async def make(self):
         self._result = await self.compute()
@@ -388,6 +390,7 @@ class StaticFileRecipe(FileRecipe):
     def __init__(self, static_file: Union[str, Path]):
         super().__init__(Path(static_file).name, [])
         self.output = Path(static_file)
+        self.hide = True
 
     async def resolve(self):
         assert self.output.exists()
@@ -602,13 +605,45 @@ class BuildEngine:
         attrs.put(DEFAULT_ATTR)
         return wrapper
 
+    def _map_dependencies(self, recipe: Recipe) -> Dict[str, Recipe]:
+        if recipe.hide:
+            return {}
+        deps = {recipe.name: recipe}
+        for input in recipe.inputs:
+            deps.update(self._map_dependencies(input))
+        return deps
+
+    def load_recipe(self, name: str) -> Recipe:
+        recipe = self.injector.require(name)
+        assert isinstance(recipe, Recipe), "The resource named '%s' is not a Recipe."
+        return recipe
+
+    def load_targetable_recipe_map(self):
+        recipe_map: Dict[str, Recipe] = {}
+        for name in self.targets:
+            recipe = self.load_recipe(name)
+            recipe_map.update(self._map_dependencies(recipe))
+        return recipe_map
+
+    def _load_targets(self, targets: List[str]) -> Generator[Recipe, None, None]:
+        recipe_map = self.load_targetable_recipe_map()
+
+        for target in targets:
+            if self.injector.has(target):
+                yield self.load_recipe(target)
+
+            elif target in recipe_map:
+                yield recipe_map[target]
+
+            else:
+                raise ValueError("")
+
     def create(self, targets: Optional[Iterable[str]] = None):
         targets = list(targets if targets is not None else [])
         if not targets and self.default_target is not None:
             targets = [self.default_target]
         assert targets, "No targets were provided."
-        targets = [target.replace("-", "_") for target in targets]
-        recipes = [self.injector.require(target) for target in targets]
+        recipes = list(self._load_targets(targets))
         assert all(
             isinstance(obj, Recipe) for obj in recipes
         ), "One or more target definitions returned a non-Recipe value."
@@ -731,12 +766,21 @@ def _setup_watcher(build: Recipe, config: BuildConfig):
 
 
 # --------------------------------------------------------------------
-def _print_targets(engine: BuildEngine, _):
+def _print_targets(engine: BuildEngine, config: BuildConfig):
+    recipe_map = engine.load_targetable_recipe_map()
+    target_set = set(engine.targets)
+
     if engine.default_target is not None:
         print("%s (default)" % engine.default_target)
-    for target in engine.targets:
+
+    for target in sorted(target_set):
         if target != engine.default_target:
             print(target)
+
+    if config.verbose:
+        for target in sorted(recipe_map.keys()):
+            if target not in target_set:
+                print(_info(target))
 
 
 # --------------------------------------------------------------------
@@ -783,7 +827,9 @@ def recipe(f):
         recipe = f(*args, **kwargs)
         recipe.name = f"{f.__name__}:{recipe.name}"
         return recipe
+
     return wrapper
+
 
 # --------------------------------------------------------------------
 def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
