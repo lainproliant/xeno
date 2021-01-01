@@ -636,7 +636,7 @@ class BuildEngine:
                 yield recipe_map[target]
 
             else:
-                raise ValueError("")
+                raise ValueError("Target is not defined: \"%s\"" % target)
 
     def create(self, targets: Optional[Iterable[str]] = None):
         targets = list(targets if targets is not None else [])
