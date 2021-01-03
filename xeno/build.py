@@ -126,6 +126,7 @@ class Recipe:
         setup: Optional["Recipe"] = None,
     ):
         self.name = self.__class__.__name__
+        self.was_named = False
         self.setup = setup
         self.inputs = [r.with_setup(setup) for r in input or []]
         self.synchronous = synchronous
@@ -137,6 +138,7 @@ class Recipe:
 
     def named(self, name: str) -> "Recipe":
         self.name = name
+        self.was_named = True
         return self
 
     def with_setup(self, setup: Optional["Recipe"]) -> "Recipe":
@@ -601,7 +603,9 @@ class BuildEngine:
                         if not isinstance(obj, Recipe)
                     ),
                 )
-                result = Recipe(results, synchronous=isinstance(result, tuple)).named(f.__name__)
+                result = Recipe(results, synchronous=isinstance(result, tuple))
+            if isinstance(result, Recipe) and not result.was_named:
+                result = result.named(f.__name__)
             assert isinstance(
                 result, Recipe
             ), "Target definition for '%s' returned a non-Recipe value ('%s')." % (
