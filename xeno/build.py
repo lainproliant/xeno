@@ -735,10 +735,11 @@ def _setup_watcher(build: Recipe, config: BuildConfig):
         def p(tag_color, s=event_data.content, text_color=lambda s: s):
             if sys.stdout.isatty():
                 clreol()
-            if isinstance(s, Exception) and config.debug:
-                s = "%s: %s" % (type(s).__name__, str(s))
-            else:
-                s = "fail"
+            if event_data.event == Event.ERROR and isinstance(s, Exception):
+                if config.debug:
+                    s = "%s: %s" % (type(s).__name__, str(s))
+                else:
+                    s = "fail"
             print(f"[{tag_color(event_data.recipe.name)}] {text_color(s)}")
 
         WATCHER_EVENT_MAP = {
