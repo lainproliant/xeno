@@ -15,7 +15,6 @@ import os
 import shlex
 import shutil
 import sys
-import traceback
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -121,12 +120,14 @@ class Recipe:
 
     def __init__(
         self,
-        name: Optional[str] = None,
         input: Optional[Iterable["Recipe"]] = None,
         synchronous=False,
+        *,
+        setup: Optional["Recipe"] = None,
     ):
-        self.name = name or self.__class__.__name__
-        self.inputs = list(input or [])
+        self.name = self.__class__.__name__
+        self.setup = setup
+        self.inputs = [r.with_setup(setup) for r in input or []]
         self.synchronous = synchronous
         self.watchers: List[EventWatcher] = []
         self.origin: Optional[str] = None
@@ -138,10 +139,22 @@ class Recipe:
         self.name = name
         return self
 
+    def with_setup(self, setup: Optional["Recipe"]) -> "Recipe":
+        if setup is None:
+            return self
+        if self.setup is not None:
+            self.setup.inputs.append(setup)
+        else:
+            self.setup = setup
+        return self
+
     def watch(self, watcher: EventWatcher):
-        self.watchers.append(watcher)
+        if watcher not in self.watchers:
+            self.watchers.append(watcher)
         for input in self.inputs:
             input.watch(watcher)
+        if self.setup is not None:
+            self.setup.watch(watcher)
 
     def trigger(self, event: Event, content: Any = None) -> EventData:
         event_data = EventData(event, self, content)
@@ -156,6 +169,8 @@ class Recipe:
                 return
             try:
                 assert self.ready
+                if self.setup is not None:
+                    await self.setup.resolve()
                 if self.synchronous:
                     for recipe in self.inputs:
                         await recipe.resolve()
@@ -297,9 +312,9 @@ class Recipe:
 # --------------------------------------------------------------------
 class ValueRecipe(Recipe, Generic[T]):
     def __init__(
-        self, name: Optional[str] = None, input: Optional[Iterable["Recipe"]] = None
+        self, input: Optional[Iterable["Recipe"]] = None
     ):
-        super().__init__(name, input)
+        super().__init__(input)
         self._result: Optional[T] = None
         self.hide = True
 
@@ -327,7 +342,8 @@ class FileRecipe(Recipe):
         input: Optional[Iterable[Recipe]] = None,
         requires: Optional[Iterable[Path]] = None,
     ):
-        super().__init__(Path(output).name, input)
+        super().__init__(input)
+        self.named(Path(output).name)
         self.output = Path(output)
         self.requires = list(requires or [])
 
@@ -387,7 +403,8 @@ class FileRecipe(Recipe):
 # --------------------------------------------------------------------
 class StaticFileRecipe(FileRecipe):
     def __init__(self, static_file: Union[str, Path]):
-        super().__init__(Path(static_file).name, [])
+        super().__init__(Path(static_file))
+        self.named(Path(static_file).name)
         self.output = Path(static_file)
         self.hide = True
 
@@ -483,7 +500,8 @@ class ShellRecipe(ShellRecipeMixin):
         cwd: Optional[Union[Path, str]] = None,
         **params,
     ):
-        super().__init__(shlex.split(cmd)[0], Recipe.suss(params))
+        super().__init__(Recipe.suss(params))
+        self.named(shlex.split(cmd)[0])
         self.shell_mixin_init(
             cmd, env, cwd, redacted, require_success, interactive, **params
         )
@@ -583,7 +601,7 @@ class BuildEngine:
                         if not isinstance(obj, Recipe)
                     ),
                 )
-                result = Recipe(f.__name__, results, isinstance(result, tuple))
+                result = Recipe(results, synchronous=isinstance(result, tuple)).named(f.__name__)
             assert isinstance(
                 result, Recipe
             ), "Target definition for '%s' returned a non-Recipe value ('%s')." % (
@@ -646,7 +664,7 @@ class BuildEngine:
         assert all(
             isinstance(obj, Recipe) for obj in recipes
         ), "One or more target definitions returned a non-Recipe value."
-        return Recipe("build", recipes)
+        return Recipe(recipes).named("build")
 
 
 # --------------------------------------------------------------------
@@ -817,13 +835,18 @@ BUILD_COMMAND_MAP = {
 }
 
 # --------------------------------------------------------------------
-def recipe(f):
+def factory(f):
     def wrapper(*args, **kwargs):
         recipe = f(*args, **kwargs)
         recipe.name = f"{f.__name__}:{recipe.name}"
         return recipe
 
     return wrapper
+
+# --------------------------------------------------------------------
+def recipe(f):
+    print("xeno.build: @recipe is deprecated, switch to @factory.", file=sys.stderr)
+    return factory(f)
 
 
 # --------------------------------------------------------------------
