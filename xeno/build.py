@@ -101,10 +101,9 @@ class Recipe:
     def suss_one(param: Any) -> Optional["Recipe"]:
         if isinstance(param, Recipe):
             return param
-        elif isinstance(param, Path):
+        if isinstance(param, Path):
             return StaticFileRecipe(param)
-        else:
-            return None
+        return None
 
     @staticmethod
     def suss(params: Dict[str, Any]) -> Generator["Recipe", None, None]:
@@ -177,7 +176,7 @@ class Recipe:
 
             except Exception as e:
                 self.failed = True
-                self.trigger(Event.ERROR, "fail")
+                self.trigger(Event.ERROR, e)
 
     async def spin(self, interval: float = 0.05, delay: float = 0.25):
         if not sys.stdout.isatty():
@@ -736,8 +735,10 @@ def _setup_watcher(build: Recipe, config: BuildConfig):
         def p(tag_color, s=event_data.content, text_color=lambda s: s):
             if sys.stdout.isatty():
                 clreol()
-            if isinstance(s, Exception):
+            if isinstance(s, Exception) and config.debug:
                 s = "%s: %s" % (type(s).__name__, str(s))
+            else:
+                s = "fail"
             print(f"[{tag_color(event_data.recipe.name)}] {text_color(s)}")
 
         WATCHER_EVENT_MAP = {
@@ -750,13 +751,6 @@ def _setup_watcher(build: Recipe, config: BuildConfig):
         }
 
         if config.debug:
-
-            def _debug_error():
-                p(_error)
-                if isinstance(event_data.content, Exception):
-                    traceback.print_exc()
-
-            WATCHER_EVENT_MAP[Event.ERROR] = _debug_error
             WATCHER_EVENT_MAP[Event.DEBUG] = lambda: p(_debug)
 
         WATCHER_EVENT_MAP.get(event_data.event, lambda: None)()
