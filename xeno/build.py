@@ -855,9 +855,11 @@ def recipe(f):
 
 # --------------------------------------------------------------------
 def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
+    config = BuildConfig(name, watchers).parse_args()
     try:
-        config = BuildConfig(name, watchers).parse_args()
         command = BUILD_COMMAND_MAP[config.mode]
         command(engine, config)
     except AssertionError as e:
         print(f"[{color('SCRIPT ERROR', bg='red', fg='white')}] {e}")
+        if config.debug:
+            traceback.print_exc()
