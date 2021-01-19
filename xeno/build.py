@@ -331,6 +331,12 @@ class ValueRecipe(Recipe, Generic[T]):
         assert self._result is not None, "Result was not computed for '%s'." % self.name
         return self._result
 
+    def tokenize(self) -> List[str]:
+        if self._result is None:
+            return []
+        else:
+            return super().tokenize()
+
     @property
     def done(self) -> bool:
         return self._result is not None
