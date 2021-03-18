@@ -540,7 +540,7 @@ class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
         cwd: Optional[Union[Path, str]] = None,
         **params,
     ):
-        super().__init__(output, Recipe.suss(params), requires)
+        FileRecipe.__init__(self, output, Recipe.suss(params), requires)
         self.shell_mixin_init(
             cmd, env, cwd, redacted, require_success, interactive, **params
         )
