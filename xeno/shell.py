@@ -12,7 +12,7 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Union, Iterable
 
 from xeno.utils import decode, is_iterable
 
@@ -43,8 +43,12 @@ def digest_params(params: EnvDict):
 
 
 # --------------------------------------------------------------------
-def check(cmd):
-    return subprocess.check_output(shlex.split(cmd)).decode("utf-8").strip()
+def check(cmd: Union[str, Iterable[str]]):
+    if isinstance(cmd, str):
+        args = shlex.split(cmd)
+    else:
+        args = [*cmd]
+    return subprocess.check_output(args).decode("utf-8").strip()
 
 
 # --------------------------------------------------------------------
@@ -80,7 +84,7 @@ class Shell:
 
     def interpolate(
         self,
-        cmd: str,
+        cmd: Union[str, Iterable[str]],
         params: EnvDict,
         wrappers: Dict[str, Callable[[str], str]] = {},
         redacted: Set[str] = set(),
@@ -97,11 +101,14 @@ class Shell:
             for k, v in digested_params.items()
         }
 
-        return cmd.format(**self._env, **redacted_params)
+        if isinstance(cmd, str):
+            return cmd.format(**self._env, **redacted_params)
+        else:
+            return shlex.join([c.format(**self._env, **redacted_params) for c in cmd])
 
     async def run(
         self,
-        cmd: str,
+        cmd: Union[str, Iterable[str]],
         stdin: Optional[InputSource] = None,
         stdout: Optional[LineSink] = None,
         stderr: Optional[LineSink] = None,
@@ -147,7 +154,7 @@ class Shell:
 
     def sync(
         self,
-        cmd: str,
+        cmd: Union[str, Iterable[str]],
         stdin: Optional[InputSource] = None,
         stdout: Optional[LineSink] = None,
         stderr: Optional[LineSink] = None,
@@ -159,6 +166,6 @@ class Shell:
             self.run(cmd, stdin, stdout, stderr, check, **params)
         )
 
-    def interact(self, cmd: str, check=False, **params) -> int:
+    def interact(self, cmd: Union[str, Iterable[str]], check=False, **params) -> int:
         cmd = self.interpolate(cmd, params)
         return self._interact(cmd, check)

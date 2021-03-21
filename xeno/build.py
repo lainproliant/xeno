@@ -15,6 +15,7 @@ import os
 import shlex
 import shutil
 import sys
+import traceback
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -100,8 +101,6 @@ class Recipe:
     def suss_one(param: Any) -> Optional["Recipe"]:
         if isinstance(param, Recipe):
             return param
-        if isinstance(param, Path):
-            return StaticFileRecipe(param)
         return None
 
     @staticmethod
@@ -170,7 +169,7 @@ class Recipe:
             if self.done and not self.outdated:
                 return
             try:
-                assert self.ready
+                assert self.ready, "Recipe %s is not ready." % self.name
                 if self.setup is not None:
                     await self.setup.resolve()
                 if self.synchronous:
@@ -357,17 +356,20 @@ class FileRecipe(Recipe):
 
     async def resolve(self):
         for path in self.requires:
-            assert path.exists()
+            assert path.exists(), "Required path %s does not exist." % path
         await super().resolve()
 
     @property
     def ready(self):
         return all(path.exists() for path in self.requires)
 
+    def _is_done(self):
+        return self.output.exists()
+
     @property
     def done(self):
         """ Whether the full result of this recipe exists. """
-        return self.output.exists()
+        return self._is_done()
 
     @property
     def age(self) -> timedelta:
@@ -417,7 +419,7 @@ class StaticFileRecipe(FileRecipe):
         self.hide = True
 
     async def resolve(self):
-        assert self.output.exists()
+        assert self.output.exists(), "Static file does not exist: %s" % self.output
 
     async def clean(self):
         pass
@@ -430,7 +432,7 @@ class StaticFileRecipe(FileRecipe):
 # --------------------------------------------------------------------
 class ShellRecipeMixin(Recipe):
     shell: Shell
-    cmd: str
+    cmd: Union[str, Iterable[str]]
     params: EnvDict
     redacted: Set[str]
     require_success: bool
@@ -445,7 +447,7 @@ class ShellRecipeMixin(Recipe):
 
     def shell_mixin_init(
         self,
-        cmd: str,
+        cmd: Union[str, Iterable[str]],
         env: Optional[EnvDict],
         cwd: Optional[Union[Path, str]] = None,
         redacted: Optional[Iterable[str]] = None,
@@ -495,12 +497,18 @@ class ShellRecipeMixin(Recipe):
     def _merge_params(self) -> EnvDict:
         return self.params
 
+    def _is_done(self):
+        return (
+            self.returncode == 0
+            if self.require_success
+            else self.returncode is not None
+        )
 
 # --------------------------------------------------------------------
 class ShellRecipe(ShellRecipeMixin):
     def __init__(
         self,
-        cmd: str,
+        cmd: Union[str, Iterable[str]],
         env: Optional[EnvDict] = None,
         redacted: Optional[Iterable[str]] = None,
         require_success=True,
@@ -509,7 +517,12 @@ class ShellRecipe(ShellRecipeMixin):
         **params,
     ):
         super().__init__(Recipe.suss(params))
-        self.named(shlex.split(cmd)[0])
+        if isinstance(cmd, str):
+            self.named(shlex.split(cmd)[0])
+        else:
+            cmd = [*cmd]
+            self.named(cmd[0])
+
         self.shell_mixin_init(
             cmd, env, cwd, redacted, require_success, interactive, **params
         )
@@ -519,18 +532,14 @@ class ShellRecipe(ShellRecipeMixin):
 
     @property
     def done(self):
-        return (
-            self.returncode == 0
-            if self.require_success
-            else self.returncode is not None
-        )
+        return self._is_done()
 
 
 # --------------------------------------------------------------------
 class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
     def __init__(
         self,
-        cmd: str,
+        cmd: Union[str, Iterable[str]],
         output: Union[str, Path],
         env: Optional[EnvDict] = None,
         redacted: Optional[Iterable[str]] = None,
@@ -552,6 +561,9 @@ class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
             "requirements": self.requires,
         }
 
+    @property
+    def done(self):
+        return FileRecipe._is_done(self)
 
 # --------------------------------------------------------------------
 def sh(*args, **kwargs) -> Recipe:
@@ -686,13 +698,13 @@ default = _engine.default
 # --------------------------------------------------------------------
 @dataclass
 class BuildConfig:
-    name: str
-    watchers: bool
+    name: str = "Default Build"
+    watchers: bool = True
     targets: List[str] = field(default_factory=list)
     mode: Mode = Mode.BUILD
     verbose: int = 0
-    debug = False
-    max_shells = multiprocessing.cpu_count()
+    debug: bool = False
+    max_shells: int = multiprocessing.cpu_count()
 
     @property
     def parser(self) -> ArgumentParser:
@@ -758,7 +770,7 @@ class BuildConfig:
 
 
 # --------------------------------------------------------------------
-def _setup_watcher(build: Recipe, config: BuildConfig):
+def setup_default_watcher(build: Recipe, config: BuildConfig = BuildConfig()):
     def _watcher(event_data: EventData):
         def p(tag_color, s=event_data.content, text_color=lambda s: s):
             if sys.stdout.isatty():
@@ -809,7 +821,7 @@ def _print_targets(engine: BuildEngine, config: BuildConfig):
 # --------------------------------------------------------------------
 def _build(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
-    _setup_watcher(build, config)
+    setup_default_watcher(build, config)
     loop = asyncio.get_event_loop()
     loop.run_until_complete(asyncio.gather(build.resolve(), build.spin()))
 
@@ -817,7 +829,7 @@ def _build(engine: BuildEngine, config: BuildConfig):
 # --------------------------------------------------------------------
 def _clean(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
-    _setup_watcher(build, config)
+    setup_default_watcher(build, config)
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
         build.cleanup(
@@ -829,7 +841,7 @@ def _clean(engine: BuildEngine, config: BuildConfig):
 # --------------------------------------------------------------------
 def _rebuild(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
-    _setup_watcher(build, config)
+    setup_default_watcher(build, config)
     loop = asyncio.get_event_loop()
     loop.run_until_complete(build.cleanup())
     loop.run_until_complete(asyncio.gather(build.resolve(), build.spin()))

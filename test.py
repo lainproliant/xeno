@@ -8,6 +8,7 @@ from xeno import (AsyncInjector, CircularDependencyError, InjectionError,
                   alias, const, inject, named, namespace, provide, singleton,
                   using)
 
+import xeno.build
 
 # --------------------------------------------------------------------
 class CommonXenoTests(unittest.TestCase):
@@ -875,6 +876,34 @@ class AsyncXenoTests(unittest.TestCase):
         injector.require('target')
         end_time = datetime.now()
         self.assertTrue(end_time - start_time < timedelta(seconds=2))
+
+
+# --------------------------------------------------------------------
+class XenoBuildTests(unittest.TestCase):
+    def test_deep_dependencies(self):
+        engine = xeno.build.BuildEngine()
+
+        @engine.provide
+        def test_dir():
+            return xeno.build.sh("mkdir {output}", output="__test__")
+
+        @engine.default
+        def test_file(test_dir):
+            return xeno.build.sh(["touch", "{output}"],
+                                 test_dir=test_dir,
+                                 output=test_dir.output/'test.file')
+
+        recipe = engine.create()
+        test_dir = engine.load_recipe('test_dir')
+        test_file = engine.load_recipe('test_file')
+        config = xeno.build.BuildConfig(debug=True, verbose=1)
+        xeno.build.setup_default_watcher(recipe, config)
+        loop = asyncio.get_event_loop()
+        print()
+        loop.run_until_complete(recipe.resolve())
+        self.assertTrue(recipe.done)
+        loop.run_until_complete(recipe.cleanup())
+        self.assertFalse(recipe.done)
 
 
 # --------------------------------------------------------------------
