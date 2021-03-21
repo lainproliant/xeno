@@ -149,6 +149,15 @@ class Recipe:
             self.setup = setup
         return self
 
+    def reveal(self, recipe: "Recipe") -> "Recipe":
+        """ Reveal an internal Recipe by exposing it to this recipe's watchers. """
+        recipe.watchers.extend(self.watchers)
+        for input in recipe.inputs:
+            self.reveal(input)
+        if recipe.setup is not None:
+            self.reveal(recipe.setup)
+        return recipe
+
     def watch(self, watcher: EventWatcher):
         if watcher not in self.watchers:
             self.watchers.append(watcher)
@@ -777,7 +786,9 @@ def setup_default_watcher(build: Recipe, config: BuildConfig = BuildConfig()):
                 clreol()
             if event_data.event == Event.ERROR and isinstance(s, Exception):
                 if config.debug:
-                    s = "%s: %s" % (type(s).__name__, str(s))
+                    exc = s
+                    s = "%s: %s\n" % (type(s).__name__, str(s))
+                    s += ''.join(traceback.format_tb(exc.__traceback__))
                 else:
                     s = "fail"
             print(f"[{tag_color(event_data.recipe.name)}] {text_color(s)}")
@@ -869,7 +880,6 @@ def factory(f):
 def recipe(f):
     print("xeno.build: @recipe is deprecated, switch to @factory.", file=sys.stderr)
     return factory(f)
-
 
 # --------------------------------------------------------------------
 def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
