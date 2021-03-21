@@ -1,4 +1,4 @@
-# --------------------------------------------------------------------
+e --------------------------------------------------------------------
 # build.py
 #
 # Author: Lain Musgrove (lain.proliant@gmail.com)
@@ -317,7 +317,6 @@ class Recipe:
 
     def __iter__(self):
         return iter(self.inputs)
-
 
 # --------------------------------------------------------------------
 class ValueRecipe(Recipe, Generic[T]):
@@ -878,8 +877,23 @@ def factory(f):
 
 # --------------------------------------------------------------------
 def recipe(f):
-    print("xeno.build: @recipe is deprecated, switch to @factory.", file=sys.stderr)
-    return factory(f)
+    def wrapper(**kwargs):
+        class OneOffRecipe(Recipe):
+            def __init__(self, prereqs: Optional[Iterable["Recipe"]]):
+                super().__init__(Recipe.suss(kwargs))
+                self._done = False
+                self.named(f.__name__)
+
+            @property
+            def done(self):
+                return self._done
+
+            async def make(self):
+                if not self._done:
+                    await async_wrap(f, **kwargs)
+                    self._done = True
+
+    return wrapper
 
 # --------------------------------------------------------------------
 def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
