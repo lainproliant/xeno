@@ -27,7 +27,9 @@ from typing import (Any, Callable, Dict, Generator, Generic, Iterable, List,
                     Optional, Set, TypeVar, Union)
 
 from xeno import Injector, MethodAttributes
-from xeno.color import clreol, color, hide_cursor, show_cursor, style
+from xeno.color import clreol, color
+from xeno.color import enable as enable_color
+from xeno.color import hide_cursor, show_cursor, style
 from xeno.shell import EnvDict, Shell
 from xeno.utils import async_wrap, file_age, is_iterable
 
@@ -705,6 +707,7 @@ class BuildConfig:
     verbose: int = 0
     debug: bool = False
     max_shells: int = multiprocessing.cpu_count()
+    force_color: bool = False
 
     @property
     def parser(self) -> ArgumentParser:
@@ -753,6 +756,11 @@ class BuildConfig:
             "-D",
             action="store_true",
             help="Print stack traces and other diagnostic info.",
+        )
+        parser.add_argument(
+            '--force-color',
+            action="store_true",
+            help="Force color output to non-tty.  Useful for IDEs."
         )
         parser.add_argument(
             "--max",
@@ -875,6 +883,8 @@ def recipe(f):
 # --------------------------------------------------------------------
 def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
     config = BuildConfig(name, watchers).parse_args()
+    if config.force_color:
+        enable_color()
     try:
         command = BUILD_COMMAND_MAP[config.mode]
         command(engine, config)
