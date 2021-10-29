@@ -81,10 +81,14 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
-### Version 4.9.0: Jan 03 2020
+### Version 4.10.0: Oct 28 2021
+- Allow recipes to be specified with glob-style wildcards, as per `fnmatch`.
+
+### Version 4.9.0: Jan 03 2021
 - Deprecate `@recipe` factory decorator for `@factory`.
 - Allow recipes to specify a `setup` recipe, which is not part
   of the recipe inputs or outputs but is needed to fulfill the task.
+
 ### Version 4.8.0: Dec 29 2020
 - All recipe resources are loaded before targets are determined.
 - Recipe names are now valid targets for a build.

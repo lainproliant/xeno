@@ -9,6 +9,7 @@
 
 import asyncio
 import atexit
+import fnmatch
 import itertools
 import multiprocessing
 import os
@@ -22,19 +23,8 @@ from datetime import datetime, timedelta
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    Generic,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    TypeVar,
-    Union,
-)
+from typing import (Any, Callable, Dict, Generator, Generic, Iterable, List,
+                    Optional, Set, TypeVar, Union)
 
 from xeno import Injector, MethodAttributes
 from xeno.color import clreol, color, hide_cursor, show_cursor, style
@@ -680,8 +670,9 @@ class BuildEngine:
             if self.injector.has(target):
                 yield self.load_recipe(target)
 
-            elif target in recipe_map:
-                yield recipe_map[target]
+            elif matching := fnmatch.filter(recipe_map.keys(), target):
+                for match in matching:
+                    yield recipe_map[match]
 
             else:
                 raise ValueError("Target is not defined: \"%s\"" % target)
