@@ -11,7 +11,9 @@ import sys
 from typing import List, Optional
 
 # --------------------------------------------------------------------
-_ansi_enabled = "NO_COLOR" not in os.environ and sys.stdout.isatty()
+_ansi_enabled = (
+    "NO_COLOR" not in os.environ and sys.stdout.isatty()
+) or "FORCE_COLOR" in os.environ
 
 # --------------------------------------------------------------------
 def disable():
@@ -60,10 +62,12 @@ def show_cursor():
         sys.stdout.write(seq("?25h"))
         sys.stdout.flush()
 
+
 # --------------------------------------------------------------------
 def hide_cursor():
     if sys.stdout.isatty():
         sys.stdout.write(seq("?25l"))
+
 
 # --------------------------------------------------------------------
 RESET = attr(0)
