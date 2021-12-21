@@ -62,15 +62,18 @@ def get_params_from_signature(f):
 
 # --------------------------------------------------------------------
 def is_iterable(obj: Any) -> bool:
-    """ Determine if the given object is an iterable sequence other than a string or byte array. """
-    return isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray))
+    """Determine if the given object is an iterable sequence other than a string or byte array."""
+    return (
+        isinstance(obj, Sequence)
+        and not isinstance(obj, (str, bytes, bytearray))
+        or inspect.isgenerator(obj)
+    )
 
 
 # --------------------------------------------------------------------
 def file_age(file: Path) -> timedelta:
-    return datetime.now() - datetime.fromtimestamp(
-        file.stat().st_mtime
-    )
+    return datetime.now() - datetime.fromtimestamp(file.stat().st_mtime)
+
 
 # --------------------------------------------------------------------
 def resolve_alias(name, aliases, visited=None):

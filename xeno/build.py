@@ -23,8 +23,19 @@ from datetime import datetime, timedelta
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import (Any, Callable, Dict, Generator, Generic, Iterable, List,
-                    Optional, Set, TypeVar, Union)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    Generic,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    TypeVar,
+    Union,
+)
 
 from xeno import Injector, MethodAttributes
 from xeno.color import clreol, color
@@ -87,7 +98,7 @@ EventWatcher = Callable[[EventData], None]
 
 # --------------------------------------------------------------------
 class Recipe:
-    """ A recipe represents a repeatable action which may be reversible. """
+    """A recipe represents a repeatable action which may be reversible."""
 
     @staticmethod
     def suss_one(param: Any) -> Optional["Recipe"]:
@@ -97,7 +108,7 @@ class Recipe:
 
     @staticmethod
     def suss(params: Dict[str, Any]) -> Generator["Recipe", None, None]:
-        """ Suss out any recipes from the given dictionary values. """
+        """Suss out any recipes from the given dictionary values."""
         for k, v in params.items():
             if is_iterable(v):
                 for x in v:
@@ -142,7 +153,7 @@ class Recipe:
         return self
 
     def reveal(self, recipe: "Recipe") -> "Recipe":
-        """ Reveal an internal Recipe by exposing it to this recipe's watchers. """
+        """Reveal an internal Recipe by exposing it to this recipe's watchers."""
         recipe.watchers.extend(self.watchers)
         for input in recipe.inputs:
             self.reveal(input)
@@ -170,7 +181,7 @@ class Recipe:
             if self.done and not self.outdated:
                 return
             try:
-                assert self.ready, "Recipe %s is not ready." % self.name
+                assert self.ready, "Recipe %s isn't ready." % self.name
                 if self.setup is not None:
                     await self.setup.resolve()
                 if self.synchronous:
@@ -179,11 +190,22 @@ class Recipe:
                 else:
                     await asyncio.gather(*(recipe.resolve() for recipe in self.inputs))
 
+                total_incomplete = 0
+                for recipe in self.inputs:
+                    if not recipe.done:
+                        total_incomplete += 1
+                        self.trigger(
+                            Event.ERROR, f"Recipe '{recipe.name}' didn't complete successfully."
+                        )
+
+                assert (
+                    total_incomplete == 0
+                ), f"{total_incomplete} recipe{'' if total_incomplete == 1 else 's'} didn't complete successfully."
                 assert all(
                     recipe.done and not recipe.outdated for recipe in self.inputs
                 ), "Some recipes didn't complete successfully."
                 await self.make()
-                assert self.done, "Recipe '%s' is not done after make." % self.name
+                assert self.done, "Recipe '%s' isn't done after make." % self.name
                 if self.outdated:
                     self.trigger(
                         Event.WARNING,
@@ -235,16 +257,16 @@ class Recipe:
             show_cursor()
 
     async def make(self):
-        """ Generate the final recipe result once all inputs are done. """
+        """Generate the final recipe result once all inputs are done."""
         pass
 
     async def clean(self):
-        """ Clean the final recipe result. """
+        """Clean the final recipe result."""
         for recipe in self.inputs:
             await recipe.cleanup(CleanupMode.RECIPE)
 
     async def cleanup(self, mode: CleanupMode = CleanupMode.RECURSIVE):
-        """ Cleanup the final result and all input results.  """
+        """Cleanup the final result and all input results."""
         async with self.lock:
             if mode == CleanupMode.SHALLOW:
                 await self.clean()
@@ -264,12 +286,12 @@ class Recipe:
 
     @property
     def result(self):
-        """ The result of the recipe.  Defaults to the result of all inputs. """
+        """The result of the recipe.  Defaults to the result of all inputs."""
         return [recipe.result for recipe in self.inputs]
 
     @property
     def ready(self):
-        """ Determine if prerequisites are met for this recipe. """
+        """Determine if prerequisites are met for this recipe."""
         return True
 
     @property
@@ -286,7 +308,7 @@ class Recipe:
 
     @property
     def done(self):
-        """ Whether the full result of this recipe exists. """
+        """Whether the full result of this recipe exists."""
         return all(recipe.done for recipe in self.inputs)
 
     @property
@@ -296,7 +318,7 @@ class Recipe:
         return min(r.age for r in self.inputs)
 
     def tokenize(self) -> List[str]:
-        """ Generate a list of tokens from the value for command interpolation. """
+        """Generate a list of tokens from the value for command interpolation."""
         tokens: List[str] = []
         if is_iterable(self.result):
             tokens.extend(str(item) for item in self.result)
@@ -313,9 +335,7 @@ class Recipe:
 
 # --------------------------------------------------------------------
 class ValueRecipe(Recipe, Generic[T]):
-    def __init__(
-        self, input: Optional[Iterable["Recipe"]] = None
-    ):
+    def __init__(self, input: Optional[Iterable["Recipe"]] = None):
         super().__init__(input)
         self._result: Optional[T] = None
         self.hide = True
@@ -328,7 +348,7 @@ class ValueRecipe(Recipe, Generic[T]):
 
     @property
     def result(self) -> T:
-        assert self._result is not None, "Result was not computed for '%s'." % self.name
+        assert self._result is not None, "Result wasn't computed for '%s'." % self.name
         return self._result
 
     def tokenize(self) -> List[str]:
@@ -369,7 +389,7 @@ class FileRecipe(Recipe):
 
     @property
     def done(self):
-        """ Whether the full result of this recipe exists. """
+        """Whether the full result of this recipe exists."""
         return self._is_done()
 
     @property
@@ -407,7 +427,7 @@ class FileRecipe(Recipe):
             self.output.unlink()
 
     async def make(self):
-        """ Abstract method: generate the file once all inputs are done. """
+        """Abstract method: generate the file once all inputs are done."""
         raise NotImplementedError()
 
 
@@ -505,6 +525,7 @@ class ShellRecipeMixin(Recipe):
             else self.returncode is not None
         )
 
+
 # --------------------------------------------------------------------
 class ShellRecipe(ShellRecipeMixin):
     def __init__(
@@ -565,6 +586,7 @@ class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
     @property
     def done(self):
         return FileRecipe._is_done(self)
+
 
 # --------------------------------------------------------------------
 def sh(*args, **kwargs) -> Recipe:
@@ -655,7 +677,7 @@ class BuildEngine:
 
     def load_recipe(self, name: str) -> Recipe:
         recipe = self.injector.require(name)
-        assert isinstance(recipe, Recipe), "The resource named '%s' is not a Recipe."
+        assert isinstance(recipe, Recipe), "The resource named '%s' isn't a Recipe."
         return recipe
 
     def load_targetable_recipe_map(self):
@@ -677,7 +699,7 @@ class BuildEngine:
                     yield recipe_map[match]
 
             else:
-                raise ValueError("Target is not defined: \"%s\"" % target)
+                raise ValueError('Target isn\'t defined: "%s"' % target)
 
     def create(self, targets: Optional[Iterable[str]] = None):
         targets = list(targets if targets is not None else [])
@@ -758,9 +780,9 @@ class BuildConfig:
             help="Print stack traces and other diagnostic info.",
         )
         parser.add_argument(
-            '--force-color',
+            "--force-color",
             action="store_true",
-            help="Force color output to non-tty.  Useful for IDEs."
+            help="Force color output to non-tty.  Useful for IDEs.",
         )
         parser.add_argument(
             "--max",
@@ -784,12 +806,10 @@ def setup_default_watcher(build: Recipe, config: BuildConfig = BuildConfig()):
             if sys.stdout.isatty():
                 clreol()
             if event_data.event == Event.ERROR and isinstance(s, Exception):
+                exc = s
+                s = "%s: %s" % (type(exc).__name__, str(exc))
                 if config.debug:
-                    exc = s
-                    s = "%s: %s\n" % (type(s).__name__, str(s))
-                    s += ''.join(traceback.format_tb(exc.__traceback__))
-                else:
-                    s = "fail"
+                    s += "\n" + "".join(traceback.format_tb(exc.__traceback__))
             print(f"[{tag_color(event_data.recipe.name)}] {text_color(s)}")
 
         WATCHER_EVENT_MAP = {
@@ -875,10 +895,12 @@ def factory(f):
 
     return wrapper
 
+
 # --------------------------------------------------------------------
 def recipe(f):
     print("xeno.build: @recipe is deprecated, switch to @factory.", file=sys.stderr)
     return factory(f)
+
 
 # --------------------------------------------------------------------
 def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
