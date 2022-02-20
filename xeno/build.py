@@ -40,7 +40,7 @@ from typing import (
 from xeno import Injector, MethodAttributes
 from xeno.color import clreol, color
 from xeno.color import enable as enable_color
-from xeno.color import hide_cursor, show_cursor, style
+from xeno.color import style
 from xeno.shell import EnvDict, Shell
 from xeno.utils import async_wrap, file_age, is_iterable
 
@@ -137,6 +137,7 @@ class Recipe:
         self.lock = asyncio.Lock()
         self.failed = False
         self.hide = False
+        self._erase_chars = 0
 
     def named(self, name: str) -> "Recipe":
         self.name = name
@@ -257,18 +258,14 @@ class Recipe:
         spinner = itertools.cycle(ansi_spinner_shape)
         start = datetime.now()
 
-        try:
-            hide_cursor()
-            atexit.register(show_cursor)
-            while not (self.done or self.failed):
-                if datetime.now() - start > timedelta(seconds=delay):
-                    sys.stdout.write(next(spinner) + color(" resolving", render="dim"))
-                    sys.stdout.write("\r")
-                    sys.stdout.flush()
-                await asyncio.sleep(interval)
-        finally:
-            atexit.unregister(show_cursor)
-            show_cursor()
+        while not (self.done or self.failed):
+            if datetime.now() - start > timedelta(seconds=delay):
+                sys.stdout.write("\r")
+                self._erase_chars = sys.stdout.write(
+                    next(spinner) + color(" resolving ", render="dim")
+                )
+                sys.stdout.flush()
+            await asyncio.sleep(interval)
 
     async def make(self):
         """Generate the final recipe result once all inputs are done."""
@@ -348,35 +345,6 @@ class Recipe:
 
 
 # --------------------------------------------------------------------
-class ValueRecipe(Recipe, Generic[T]):
-    def __init__(self, input: Optional[Iterable["Recipe"]] = None):
-        super().__init__(input)
-        self._result: Optional[T] = None
-        self.hide = True
-
-    async def make(self):
-        self._result = await self.compute()
-
-    async def compute(self) -> T:
-        raise NotImplementedError()
-
-    @property
-    def result(self) -> T:
-        assert self._result is not None, "Result wasn't computed for '%s'." % self.name
-        return self._result
-
-    def tokenize(self) -> List[str]:
-        if self._result is None:
-            return []
-        else:
-            return super().tokenize()
-
-    @property
-    def done(self) -> bool:
-        return self._result is not None
-
-
-# --------------------------------------------------------------------
 class FileRecipe(Recipe):
     def __init__(
         self,
@@ -434,7 +402,7 @@ class FileRecipe(Recipe):
         if not self.output.exists():
             return
 
-        self.trigger(Event.CLEAN, "delete %s" % str(self.output))
+        self.trigger(Event.CLEAN, f"delete {str(self.output)}")
         if self.output.is_dir():
             shutil.rmtree(self.output)
         else:
@@ -488,6 +456,7 @@ class ShellRecipeMixin(Recipe):
         redacted: Optional[Iterable[str]] = None,
         require_success=True,
         interactive=False,
+        as_user: Optional[str] = None,
         **params,
     ):
         self.shell = Shell(
@@ -498,12 +467,14 @@ class ShellRecipeMixin(Recipe):
         self.redacted = set(redacted or [])
         self.require_success = require_success
         self.interactive = interactive
+        self.as_user = as_user
         self.returncode = None
 
     async def make(self):
         self.trigger(
             Event.START,
-            self.shell.interpolate(
+            self._as_user_prefix()
+            + self.shell.interpolate(
                 self.cmd,
                 self._merge_params(),
                 {
@@ -516,8 +487,13 @@ class ShellRecipeMixin(Recipe):
             ),
         )
 
-        if self.interactive:
-            self.returncode = self.shell.interact(self.cmd, **self._merge_params())
+        if self.interactive or self.as_user:
+            if self.as_user:
+                self.returncode = self.shell.interact_as(
+                    self.as_user, self.cmd, **self._merge_params()
+                )
+            else:
+                self.returncode = self.shell.interact(self.cmd, **self._merge_params())
 
         else:
             self.returncode = await self.shell.run(
@@ -531,6 +507,13 @@ class ShellRecipeMixin(Recipe):
 
     def _merge_params(self) -> EnvDict:
         return self.params
+
+    def _as_user_prefix(self) -> str:
+        if self.as_user is not None:
+            display_user = f"(as {self.as_user})"
+            display_user = color(display_user, fg="yellow")
+            return display_user + " "
+        return ""
 
     def _is_done(self):
         return (
@@ -600,6 +583,23 @@ class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
     @property
     def done(self):
         return FileRecipe._is_done(self)
+
+    async def clean(self):
+        if not self.output.exists():
+            return
+
+        if self.as_user:
+            self.trigger(
+                Event.CLEAN, self._as_user_prefix() + f"delete {str(self.output)}"
+            )
+            Shell().interact_as(self.as_user, "rm -r {output}", output=self.output)
+            return
+
+        self.trigger(Event.CLEAN, f"delete {str(self.output)}")
+        if self.output.is_dir():
+            shutil.rmtree(self.output)
+        else:
+            self.output.unlink()
 
 
 # --------------------------------------------------------------------
@@ -824,6 +824,9 @@ def setup_default_watcher(build: Recipe, config: BuildConfig = BuildConfig()):
                 s = "%s: %s" % (type(exc).__name__, str(exc))
                 if config.debug:
                     s += "\n" + "".join(traceback.format_tb(exc.__traceback__))
+            sys.stdout.write("\r")
+            sys.stdout.write(" " * build._erase_chars)
+            sys.stdout.write("\r")
             print(f"[{tag_color(event_data.recipe.name)}] {text_color(s)}")
 
         WATCHER_EVENT_MAP = {

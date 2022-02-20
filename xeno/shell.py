@@ -102,9 +102,13 @@ class Shell:
         }
 
         if isinstance(cmd, str):
-            return cmd.format(**self._env, **redacted_params)
+            final_cmd = cmd.format(**self._env, **redacted_params)
         else:
-            return shlex.join([c.format(**self._env, **redacted_params) for c in cmd])
+            final_cmd = shlex.join(
+                [c.format(**self._env, **redacted_params) for c in cmd]
+            )
+
+        return final_cmd
 
     async def run(
         self,
@@ -113,7 +117,7 @@ class Shell:
         stdout: Optional[LineSink] = None,
         stderr: Optional[LineSink] = None,
         check=False,
-        **params
+        **params,
     ) -> int:
 
         rl_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
@@ -159,7 +163,7 @@ class Shell:
         stdout: Optional[LineSink] = None,
         stderr: Optional[LineSink] = None,
         check=False,
-        **params
+        **params,
     ) -> int:
         loop = asyncio.get_event_loop()
         return loop.run_until_complete(
@@ -168,4 +172,11 @@ class Shell:
 
     def interact(self, cmd: Union[str, Iterable[str]], check=False, **params) -> int:
         cmd = self.interpolate(cmd, params)
+        return self._interact(cmd, check)
+
+    def interact_as(
+        self, as_user: str, cmd: Union[str, Iterable[str]], check=False, **params
+    ) -> int:
+        cmd = self.interpolate(cmd, params)
+        cmd = shlex.join(["sudo", "-u", as_user, "sh", "-c", cmd])
         return self._interact(cmd, check)
