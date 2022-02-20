@@ -148,6 +148,14 @@ class Recipe:
         parts[-1] = prefix + parts[-1]
         return self.named(":".join(parts))
 
+    def with_type(self, type_name: str) -> "Recipe":
+        parts = self.name.split(":")
+        if len(parts) > 1:
+            parts[0] = type_name
+        else:
+            parts.insert(0, type_name)
+        return self.named(":".join(parts))
+
     def with_setup(self, setup: Optional["Recipe"]) -> "Recipe":
         if setup is None:
             return self
@@ -895,9 +903,7 @@ BUILD_COMMAND_MAP = {
 # --------------------------------------------------------------------
 def factory(f):
     def wrapper(*args, **kwargs):
-        recipe = f(*args, **kwargs)
-        recipe.name = f"{f.__name__}:{recipe.name}"
-        return recipe
+        return f(*args, **kwargs).with_type(f.__name__)
 
     return wrapper
 
