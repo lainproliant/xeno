@@ -144,7 +144,7 @@ class Recipe:
         return self
 
     def with_prefix(self, prefix: str) -> "Recipe":
-        parts = prefix.split(":")
+        parts = self.name.split(":")
         parts[-1] = prefix + parts[-1]
         return self.named(":".join(parts))
 
