@@ -143,6 +143,9 @@ class Recipe:
         self.was_named = True
         return self
 
+    def with_prefix(self, prefix: str) -> "Recipe":
+        return self.named(prefix + self.name)
+
     def with_setup(self, setup: Optional["Recipe"]) -> "Recipe":
         if setup is None:
             return self
@@ -195,7 +198,8 @@ class Recipe:
                     if not recipe.done:
                         total_incomplete += 1
                         self.trigger(
-                            Event.ERROR, f"Recipe '{recipe.name}' didn't complete successfully."
+                            Event.ERROR,
+                            f"Recipe '{recipe.name}' didn't complete successfully.",
                         )
 
                 assert (
