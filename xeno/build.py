@@ -144,7 +144,9 @@ class Recipe:
         return self
 
     def with_prefix(self, prefix: str) -> "Recipe":
-        return self.named(prefix + self.name)
+        parts = prefix.split(":")
+        parts[-1] = prefix + parts[-1]
+        return self.named(":".join(parts))
 
     def with_setup(self, setup: Optional["Recipe"]) -> "Recipe":
         if setup is None:
