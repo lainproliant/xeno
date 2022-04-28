@@ -8,7 +8,6 @@
 # --------------------------------------------------------------------
 
 import asyncio
-import atexit
 import fnmatch
 import itertools
 import multiprocessing
@@ -28,7 +27,6 @@ from typing import (
     Callable,
     Dict,
     Generator,
-    Generic,
     Iterable,
     List,
     Optional,
@@ -97,28 +95,35 @@ class EventData:
 EventWatcher = Callable[[EventData], None]
 
 # --------------------------------------------------------------------
+def cleanup_file(file: Path):
+    if file.is_dir():
+        shutil.rmtree(file)
+    else:
+        file.unlink()
+
+# --------------------------------------------------------------------
 class Recipe:
     """A recipe represents a repeatable action which may be reversible."""
 
     @staticmethod
-    def suss_one(param: Any) -> Optional["Recipe"]:
+    def detect_one(param: Any) -> Optional["Recipe"]:
         if isinstance(param, Recipe):
             return param
         return None
 
     @staticmethod
-    def suss(params: Dict[str, Any]) -> Generator["Recipe", None, None]:
-        """Suss out any recipes from the given dictionary values."""
-        for k, v in params.items():
+    def detect(args: Iterable[Any], kwargs: Dict[str, Any]) -> Generator["Recipe", None, None]:
+        """Detect out any recipes from the given dictionary values."""
+        for v in args:
+            if Recipe.detect_one(v):
+                yield v
+
+        for k, v in kwargs.items():
             if is_iterable(v):
-                for x in v:
-                    sussed = Recipe.suss_one(v)
-                    if isinstance(sussed, Recipe):
-                        yield sussed
+                yield from Recipe.detect(v, {})
             else:
-                sussed = Recipe.suss_one(v)
-                if isinstance(sussed, Recipe):
-                    yield sussed
+                if Recipe.detect_one(v):
+                    yield v
 
     def __init__(
         self,
@@ -192,7 +197,7 @@ class Recipe:
     async def resolve(self):
         self.failed = False
         async with self.lock:
-            if self.done and not self.outdated:
+            if self.done() and not self.outdated():
                 return
             try:
                 assert self.ready, "Recipe %s isn't ready." % self.name
@@ -345,6 +350,66 @@ class Recipe:
 
 
 # --------------------------------------------------------------------
+class FunctionalRecipe(Recipe):
+    def __init__(self,
+                 make: Any,
+                 done: Optional[Any],
+                 clean: Optional[Any],
+                 args: Iterable[Any],
+                 kwargs: Dict[str, Any]):
+        super().__init__(Recipe.detect(args, kwargs))
+        self._make = make
+        self._done = done
+        self._clean = clean
+        self._executed = False
+        self._result = None
+        self._args = args
+        self._kwargs = kwargs
+
+    @property
+    def result(self):
+        return self._result
+
+    async def clean(self):
+        if self._clean is not None:
+            await async_wrap(self._clean, self._args, self._kwargs)
+
+        if isinstance(self._result, Path) and self._result.exists():
+            self.trigger(Event.CLEAN, f"delete {str(self.result)}")
+            cleanup_file(self.result)
+        self._result = None
+        self._executed = False
+
+    async def make(self):
+        await async_wrap(self._make, self._args, self._kwargs)
+        self._done = True
+
+    def done(self):
+        if self._done is not None:
+            return super().done() and self._done(*self._args, **self._kwargs)
+        return super().done() and self._done
+
+# --------------------------------------------------------------------
+class FunctionalDecorator:
+    def __init__(self, f):
+        self._make = f
+        self._done = None
+        self._cleanup = None
+
+    def cleanup(self, f):
+        self._cleanup = f
+        return f
+
+    def done(self, f):
+        self._done = f
+        return f
+
+    def make_recipe(self, *args, **kwargs):
+        return FunctionalRecipe(self._make, self._done, self._cleanup,
+                                args, kwargs)
+
+
+# --------------------------------------------------------------------
 class FileRecipe(Recipe):
     def __init__(
         self,
@@ -362,39 +427,33 @@ class FileRecipe(Recipe):
             assert path.exists(), "Required path %s does not exist." % path
         await super().resolve()
 
-    @property
     def ready(self):
         return all(path.exists() for path in self.requires)
 
     def _is_done(self):
         return self.output.exists()
 
-    @property
     def done(self):
         """Whether the full result of this recipe exists."""
         return self._is_done()
 
-    @property
     def age(self) -> timedelta:
         if not self.output.exists():
             return timedelta.max
         return datetime.now() - datetime.fromtimestamp(self.output.stat().st_mtime)
 
-    @property
     def min_require_age(self) -> timedelta:
         return (
             min(file_age(f) for f in self.requires) if self.requires else timedelta.max
         )
 
-    @property
     def outdated(self) -> bool:
         return (
-            self.inputs_outdated
-            or self.age > self.min_input_age
-            or self.age > self.min_require_age
+            self.inputs_outdated()
+            or self.age() > self.min_input_age()
+            or self.age() > self.min_require_age()
         )
 
-    @property
     def result(self) -> Path:
         return self.output
 
@@ -403,10 +462,7 @@ class FileRecipe(Recipe):
             return
 
         self.trigger(Event.CLEAN, f"delete {str(self.output)}")
-        if self.output.is_dir():
-            shutil.rmtree(self.output)
-        else:
-            self.output.unlink()
+        cleanup_file(self.output)
 
     async def make(self):
         """Abstract method: generate the file once all inputs are done."""
@@ -427,7 +483,6 @@ class StaticFileRecipe(FileRecipe):
     async def clean(self):
         pass
 
-    @property
     def outdated(self):
         return False
 
@@ -535,7 +590,7 @@ class ShellRecipe(ShellRecipeMixin):
         cwd: Optional[Union[Path, str]] = None,
         **params,
     ):
-        super().__init__(Recipe.suss(params))
+        super().__init__(Recipe.detect([], params))
         if isinstance(cmd, str):
             self.named(shlex.split(cmd)[0])
         else:
@@ -549,7 +604,6 @@ class ShellRecipe(ShellRecipeMixin):
             shlex.split(self.shell.interpolate(cmd, self._merge_params()))[0]
         ).stem
 
-    @property
     def done(self):
         return self._is_done()
 
@@ -568,7 +622,7 @@ class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
         cwd: Optional[Union[Path, str]] = None,
         **params,
     ):
-        FileRecipe.__init__(self, output, Recipe.suss(params), requires)
+        FileRecipe.__init__(self, output, Recipe.detect([], params), requires)
         self.shell_mixin_init(
             cmd, env, cwd, redacted, require_success, interactive, **params
         )
@@ -580,7 +634,6 @@ class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
             "requirements": self.requires,
         }
 
-    @property
     def done(self):
         return FileRecipe._is_done(self)
 
@@ -913,9 +966,11 @@ def factory(f):
 
 # --------------------------------------------------------------------
 def recipe(f):
-    print("xeno.build: @recipe is deprecated, switch to @factory.", file=sys.stderr)
-    return factory(f)
+    decorator = FunctionalDecorator(f)
 
+    def wrapper(*args, **kwargs):
+        recipe = decorator.make_recipe(args, kwargs)
+        return recipe
 
 # --------------------------------------------------------------------
 def build(*, engine: BuildEngine = _engine, name="xeno.build script", watchers=True):
