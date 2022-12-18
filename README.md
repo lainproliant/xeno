@@ -81,6 +81,9 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 4.12.0: Aug 07 2022
+- Changes to support Python 3.10, older versions are now deprecated.
+
 ### Version 4.10.0: Oct 28 2021
 - Allow recipes to be specified with glob-style wildcards, as per `fnmatch`.
 

@@ -12,11 +12,20 @@ import inspect
 from collections import defaultdict
 
 from .abstract import AbstractInjector
-from .attributes import (NOTHING, ClassAttributes, MethodAttributes,
-                         get_injection_params, get_injection_points)
+from .attributes import (
+    NOTHING,
+    ClassAttributes,
+    MethodAttributes,
+    get_injection_params,
+    get_injection_points,
+)
 from .decorators import named, singleton
-from .errors import (ClassInjectionError, MethodInjectionError,
-                     MissingDependencyError, MissingResourceError)
+from .errors import (
+    ClassInjectionError,
+    MethodInjectionError,
+    MissingDependencyError,
+    MissingResourceError,
+)
 from .namespaces import Namespace
 from .utils import async_map, async_wrap, resolve_alias
 
@@ -44,7 +53,6 @@ class AsyncInjector(AbstractInjector):
                   More modules can be added later by calling
                   Injector.add_module().
         """
-        self.loop = asyncio.get_event_loop()
         self.async_injection_interceptors = []
         self.singleton_locks = defaultdict(asyncio.Lock)
         super().__init__(*modules)
@@ -65,7 +73,7 @@ class AsyncInjector(AbstractInjector):
         with these parameters in the constructor, then mark one or more
         methods with @inject and pass the instance to Injector.inject().
         """
-        return self.loop.run_until_complete(self.create_async(class_))
+        return asyncio.run(self.create_async(class_))
 
     async def create_async(self, class_):
         """
@@ -107,7 +115,7 @@ class AsyncInjector(AbstractInjector):
              methods are all invoked with resources from the Injector.
         aliases: An optional map from dependency alias to real dependency name.
         """
-        return self.loop.run_until_complete(self.inject_async(obj, aliases, namespace))
+        return asyncio.run(self.inject_async(obj, aliases, namespace))
 
     async def inject_async(self, obj, aliases={}, namespace=""):
         """
@@ -140,7 +148,7 @@ class AsyncInjector(AbstractInjector):
         MethodInjectionError instead of InjectionError if the resource was
         not provided.
         """
-        return self.loop.run_until_complete(self.require_async(name, method))
+        return asyncio.run(self.require_async(name, method))
 
     async def require_async(self, name, method=None):
         """
@@ -156,11 +164,13 @@ class AsyncInjector(AbstractInjector):
         """
         return await self._require_coro(name, method)
 
-    async def provide_async(self, name_or_method, value=NOTHING, is_singleton=False, namespace=None):
+    async def provide_async(
+        self, name_or_method, value=NOTHING, is_singleton=False, namespace=None
+    ):
 
         if inspect.ismethod(name_or_method) or inspect.isfunction(name_or_method):
             value = name_or_method
-            name = MethodAttributes.for_method(name_or_method).get('name')
+            name = MethodAttributes.for_method(name_or_method).get("name")
         elif value is NOTHING:
             raise ValueError("A name and value or just a method must be provided.")
         else:
@@ -182,12 +192,14 @@ class AsyncInjector(AbstractInjector):
                 wrapper = singleton(wrapper)
             await self._bind_resource_async(wrapper, namespace=namespace)
 
-    def provide(self, name_or_method, value=NOTHING, is_singleton=False, namespace=None):
+    def provide(
+        self, name_or_method, value=NOTHING, is_singleton=False, namespace=None
+    ):
         """
         Overrides: AbstractInjector
         """
 
-        return self.loop.run_until_complete(
+        return asyncio.run(
             self.provide_async(name_or_method, value, is_singleton, namespace)
         )
 
@@ -218,6 +230,7 @@ class AsyncInjector(AbstractInjector):
         injected_method = await self.inject_async(bound_method, aliases, namespace)
 
         if attrs.check("singleton"):
+
             async def wrapper():
                 async with self.singleton_locks[name]:
                     if name not in self.singletons:
@@ -244,7 +257,7 @@ class AsyncInjector(AbstractInjector):
         """
         Overrides: AbstractInjector
         """
-        return self.loop.run_until_complete(
+        return asyncio.run(
             self._bind_resource_async(bound_method, module_aliases, namespace)
         )
 
@@ -267,14 +280,16 @@ class AsyncInjector(AbstractInjector):
                     continue
                 resource_name = param
                 if resource_name.startswith(Namespace.SEP):
-                    resource_name = resource_name[len(Namespace.SEP):]
+                    resource_name = resource_name[len(Namespace.SEP) :]
                 resource_name = resolve_alias(resource_name, aliases)
                 resource_async_map[param] = self._require_coro(resource_name)
                 param_resource_map[param] = resource_name
 
-            param_map = dict(await asyncio.gather(
-                *(async_map(k, c) for k, c in resource_async_map.items())
-            ))
+            param_map = dict(
+                await asyncio.gather(
+                    *(async_map(k, c) for k, c in resource_async_map.items())
+                )
+            )
 
         except MissingResourceError as e:
             raise MissingDependencyError(full_name, e.name) from e

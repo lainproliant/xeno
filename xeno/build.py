@@ -648,15 +648,16 @@ class BuildEngine:
             )
             if is_iterable(result):
                 results = list(result)
-                assert all(
-                    isinstance(obj, Recipe) for obj in results
-                ), "Target definition for '%s' returned an iterable containing non-Recipe values (e.g. '%s')." % (
-                    f.__name__,
-                    next(
-                        type(obj).__qualname__
-                        for obj in result
-                        if not isinstance(obj, Recipe)
-                    ),
+                assert all(isinstance(obj, Recipe) for obj in results), (
+                    "Target definition for '%s' returned an iterable containing non-Recipe values (e.g. '%s')."
+                    % (
+                        f.__name__,
+                        next(
+                            type(obj).__qualname__
+                            for obj in result
+                            if not isinstance(obj, Recipe)
+                        ),
+                    )
                 )
                 result = Recipe(results, synchronous=isinstance(result, tuple))
             if isinstance(result, Recipe) and not result.was_named:
@@ -869,30 +870,25 @@ def _print_targets(engine: BuildEngine, config: BuildConfig):
 def _build(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
     setup_default_watcher(build, config)
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(asyncio.gather(build.resolve(), build.spin()))
+    asyncio.run(asyncio.gather(build.resolve(), build.spin()))
 
 
 # --------------------------------------------------------------------
 def _clean(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
     setup_default_watcher(build, config)
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         build.cleanup(
             CleanupMode.RECURSIVE if config.mode == Mode.CLEAN else CleanupMode.RECIPE
         )
     )
 
-
 # --------------------------------------------------------------------
 def _rebuild(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
     setup_default_watcher(build, config)
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(build.cleanup())
-    loop.run_until_complete(asyncio.gather(build.resolve(), build.spin()))
-
+    asyncio.run(build.cleanup())
+    asyncio.run(asyncio.gather(build.resolve(), build.spin()))
 
 # --------------------------------------------------------------------
 BUILD_COMMAND_MAP = {

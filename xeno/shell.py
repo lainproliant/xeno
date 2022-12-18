@@ -165,10 +165,7 @@ class Shell:
         check=False,
         **params,
     ) -> int:
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(
-            self.run(cmd, stdin, stdout, stderr, check, **params)
-        )
+        asyncio.run(self.run(cmd, stdin, stdout, stderr, check, **params))
 
     def interact(self, cmd: Union[str, Iterable[str]], check=False, **params) -> int:
         cmd = self.interpolate(cmd, params)

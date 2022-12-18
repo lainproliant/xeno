@@ -898,11 +898,10 @@ class XenoBuildTests(unittest.TestCase):
         test_file = engine.load_recipe('test_file')
         config = xeno.build.BuildConfig(debug=True, verbose=1)
         xeno.build.setup_default_watcher(recipe, config)
-        loop = asyncio.get_event_loop()
         print()
-        loop.run_until_complete(recipe.resolve())
+        asyncio.run(recipe.resolve())
         self.assertTrue(recipe.done)
-        loop.run_until_complete(recipe.cleanup())
+        asyncio.run(recipe.cleanup())
         self.assertFalse(recipe.done)
 
 
