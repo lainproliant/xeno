@@ -101,24 +101,24 @@ class Recipe:
     """A recipe represents a repeatable action which may be reversible."""
 
     @staticmethod
-    def suss_one(param: Any) -> Optional["Recipe"]:
+    def as_recipe(param: Any) -> Optional["Recipe"]:
         if isinstance(param, Recipe):
             return param
         return None
 
     @staticmethod
-    def suss(params: Dict[str, Any]) -> Generator["Recipe", None, None]:
-        """Suss out any recipes from the given dictionary values."""
+    def extract(params: Dict[str, Any]) -> Generator["Recipe", None, None]:
+        """Extract any recipes from the given dictionary values."""
         for k, v in params.items():
             if is_iterable(v):
                 for x in v:
-                    sussed = Recipe.suss_one(v)
-                    if isinstance(sussed, Recipe):
-                        yield sussed
+                    extracted = Recipe.as_recipe(v)
+                    if isinstance(extracted, Recipe):
+                        yield extracted
             else:
-                sussed = Recipe.suss_one(v)
-                if isinstance(sussed, Recipe):
-                    yield sussed
+                extracted = Recipe.as_recipe(v)
+                if isinstance(extracted, Recipe):
+                    yield extracted
 
     def __init__(
         self,
@@ -535,7 +535,7 @@ class ShellRecipe(ShellRecipeMixin):
         cwd: Optional[Union[Path, str]] = None,
         **params,
     ):
-        super().__init__(Recipe.suss(params))
+        super().__init__(Recipe.extract(params))
         if isinstance(cmd, str):
             self.named(shlex.split(cmd)[0])
         else:
@@ -568,7 +568,7 @@ class ShellFileRecipe(ShellRecipeMixin, FileRecipe):
         cwd: Optional[Union[Path, str]] = None,
         **params,
     ):
-        FileRecipe.__init__(self, output, Recipe.suss(params), requires)
+        FileRecipe.__init__(self, output, Recipe.extract(params), requires)
         self.shell_mixin_init(
             cmd, env, cwd, redacted, require_success, interactive, **params
         )
@@ -883,12 +883,14 @@ def _clean(engine: BuildEngine, config: BuildConfig):
         )
     )
 
+
 # --------------------------------------------------------------------
 def _rebuild(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
     setup_default_watcher(build, config)
     asyncio.run(build.cleanup())
     asyncio.run(asyncio.gather(build.resolve(), build.spin()))
+
 
 # --------------------------------------------------------------------
 BUILD_COMMAND_MAP = {
@@ -900,17 +902,25 @@ BUILD_COMMAND_MAP = {
 }
 
 # --------------------------------------------------------------------
-def factory(f):
+def action(f):
+    """
+    Decorator for a function returning a Recipe.  Imparts the name
+    of the function as the action type for the Recipe.
+    """
+
     def wrapper(*args, **kwargs):
-        return f(*args, **kwargs).with_type(f.__name__)
+        result = f(*args, **kwargs)
+        if not isinstance(result, Recipe):
+            raise ValueError(f"Action function {f.__name__} did not return a recipe.")
+        return result.with_type(f.__name__)
 
     return wrapper
 
 
 # --------------------------------------------------------------------
-def recipe(f):
-    print("xeno.build: @recipe is deprecated, switch to @factory.", file=sys.stderr)
-    return factory(f)
+def factory(f):
+    print("xeno: @factory is deprecated, use @action instead.")
+    return action(f)
 
 
 # --------------------------------------------------------------------
