@@ -870,14 +870,18 @@ def _print_targets(engine: BuildEngine, config: BuildConfig):
 def _build(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
     setup_default_watcher(build, config)
-    asyncio.run(asyncio.gather(build.resolve(), build.spin()))
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(asyncio.gather(build.resolve(), build.spin()))
 
 
 # --------------------------------------------------------------------
 def _clean(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
     setup_default_watcher(build, config)
-    asyncio.run(
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(
         build.cleanup(
             CleanupMode.RECURSIVE if config.mode == Mode.CLEAN else CleanupMode.RECIPE
         )
@@ -888,8 +892,10 @@ def _clean(engine: BuildEngine, config: BuildConfig):
 def _rebuild(engine: BuildEngine, config: BuildConfig):
     build = engine.create(config.targets)
     setup_default_watcher(build, config)
-    asyncio.run(build.cleanup())
-    asyncio.run(asyncio.gather(build.resolve(), build.spin()))
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(build.cleanup())
+    loop.run_until_complete(asyncio.gather(build.resolve(), build.spin()))
 
 
 # --------------------------------------------------------------------
