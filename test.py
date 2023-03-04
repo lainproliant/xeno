@@ -2,13 +2,29 @@ import unittest
 import asyncio
 from datetime import datetime, timedelta
 
-from xeno import (AsyncInjector, CircularDependencyError, InjectionError,
-                  InvalidResourceError, ClassAttributes, MethodAttributes,
-                  MissingDependencyError, MissingResourceError, SyncInjector,
-                  alias, const, inject, named, namespace, provide, singleton,
-                  using)
+from xeno import (
+    AsyncInjector,
+    CircularDependencyError,
+    InjectionError,
+    InvalidResourceError,
+    ClassAttributes,
+    MethodAttributes,
+    MissingDependencyError,
+    MissingResourceError,
+    SyncInjector,
+    alias,
+    const,
+    inject,
+    named,
+    namespace,
+    provide,
+    singleton,
+    using,
+)
 
 import xeno.build
+from xeno.pkg_config import PackageConfig
+
 
 # --------------------------------------------------------------------
 class CommonXenoTests(unittest.TestCase):
@@ -34,8 +50,8 @@ class CommonXenoTests(unittest.TestCase):
 
     def test_ctor_injection_with_methods(self):
         """Test to verify that constructor injection works properly,
-           and that @inject methods are invoked on the resulting
-           instance."""
+        and that @inject methods are invoked on the resulting
+        instance."""
 
         class Module:
             @provide
@@ -62,7 +78,7 @@ class CommonXenoTests(unittest.TestCase):
 
     def test_instance_injection(self):
         """Test to verify that injection on an existing instance
-           works without constructor injection."""
+        works without constructor injection."""
 
         class Module:
             @provide
@@ -116,7 +132,7 @@ class CommonXenoTests(unittest.TestCase):
 
     def test_illegal_ctor_injection(self):
         """Test to verify that a constructor with invalid param types
-           is not injectable."""
+        is not injectable."""
 
         class Module:
             @provide
@@ -134,7 +150,7 @@ class CommonXenoTests(unittest.TestCase):
 
     def test_illegal_module_injection(self):
         """Test to verify that a module @provide method with invalid
-           param types is not injectable."""
+        param types is not injectable."""
 
         class Module:
             @provide
@@ -163,8 +179,8 @@ class CommonXenoTests(unittest.TestCase):
 
     def test_ctor_injection_with_defaults_not_provided(self):
         """Test to verify that a constructor with defaults that
-           are not provided as resources is able to be called
-           via the injector."""
+        are not provided as resources is able to be called
+        via the injector."""
 
         class Module:
             @provide
@@ -183,9 +199,9 @@ class CommonXenoTests(unittest.TestCase):
 
     def test_ctor_injection_with_defaults_provided(self):
         """Test to verify that a constructor with defaults that
-           are provided as resources are able to be called via
-           the injector and that the injector provided resources
-           are given instead of the defaults."""
+        are provided as resources are able to be called via
+        the injector and that the injector provided resources
+        are given instead of the defaults."""
 
         class Module:
             @provide
@@ -298,8 +314,7 @@ class CommonXenoTests(unittest.TestCase):
 
         def intercept_address_card(attrs, param_map, alias_map):
             if "address_card" in param_map:
-                param_map["address_card"] += \
-                    "\n2000 1st Street, Seattle WA 98125"
+                param_map["address_card"] += "\n2000 1st Street, Seattle WA 98125"
             return param_map
 
         class AddressPrinter:
@@ -355,8 +370,7 @@ class CommonXenoTests(unittest.TestCase):
 
         with self.assertRaises(InjectionError) as context:
             self.make_injector(ModuleA())
-        self.assertTrue(str(context.exception).startswith(
-            "Alias loop detected"))
+        self.assertTrue(str(context.exception).startswith("Alias loop detected"))
 
     def test_cross_namespace_alias(self):
         @namespace("a")
@@ -366,7 +380,7 @@ class CommonXenoTests(unittest.TestCase):
                 return 1
 
         @namespace("b")
-        @alias('value', 'a/value')
+        @alias("value", "a/value")
         class ModuleB:
             @provide
             def result(self, value):
@@ -384,7 +398,7 @@ class CommonXenoTests(unittest.TestCase):
 
         class ModuleB:
             @provide
-            @alias('value', 'a/value')
+            @alias("value", "a/value")
             def result(self, value):
                 return value + 1
 
@@ -401,7 +415,7 @@ class CommonXenoTests(unittest.TestCase):
         @namespace("com/lainproliant/other_stuff")
         class ModuleB:
             @provide
-            @alias('name', 'com/lainproliant/stuff/name')
+            @alias("name", "com/lainproliant/stuff/name")
             def address(self, name):
                 return "%s: Seattle, WA" % name
 
@@ -457,8 +471,7 @@ class CommonXenoTests(unittest.TestCase):
         self.assertTrue("zip_code" in dep_tree)
         self.assertTrue("first_name" in dep_tree["name"])
         self.assertTrue("last_name" in dep_tree["name"])
-        self.assertEqual("Pontifex Rex\n1024 Street Ave\nSeattle, WA 98101",
-                         address)
+        self.assertEqual("Pontifex Rex\n1024 Street Ave\nSeattle, WA 98101", address)
 
     def test_injector_provide(self):
         class ModuleA:
@@ -605,7 +618,7 @@ class CommonXenoTests(unittest.TestCase):
                 return "123 Main St."
 
             @provide
-            @alias('name', 'A/first_name')
+            @alias("name", "A/first_name")
             def first_name(self, name):
                 return name[::-1]
 
@@ -642,12 +655,9 @@ class CommonXenoTests(unittest.TestCase):
                 return 5
 
         injector = self.make_injector(ModuleA())
-        self.assertListEqual([*sorted(injector.get_dependencies("d"))],
-                             ["a", "b", "c"])
-        self.assertListEqual([*sorted(injector.get_dependencies("e"))],
-                             ["b", "d"])
-        self.assertListEqual([*sorted(injector.get_dependencies("a"))],
-                             [])
+        self.assertListEqual([*sorted(injector.get_dependencies("d"))], ["a", "b", "c"])
+        self.assertListEqual([*sorted(injector.get_dependencies("e"))], ["b", "d"])
+        self.assertListEqual([*sorted(injector.get_dependencies("a"))], [])
 
     def test_namespace_get_leaves(self):
         @namespace("com/example/core")
@@ -741,8 +751,7 @@ class CommonXenoTests(unittest.TestCase):
                 return "Musgrove"
 
         injector = self.make_injector(Core())
-        self.assertEqual("The Right Honourable Lain Musgrove",
-                         injector.require("name"))
+        self.assertEqual("The Right Honourable Lain Musgrove", injector.require("name"))
 
     def test_ordered_dependencies(self):
         class Test:
@@ -767,8 +776,9 @@ class CommonXenoTests(unittest.TestCase):
                 pass
 
         injector = self.make_injector(Test())
-        self.assertListEqual(injector.get_ordered_dependencies('e'),
-                             ['a', 'b', 'c', 'd'])
+        self.assertListEqual(
+            injector.get_ordered_dependencies("e"), ["a", "b", "c", "d"]
+        )
 
     def test_outsider_provide(self):
         injector = self.make_injector()
@@ -796,6 +806,7 @@ class CommonXenoTests(unittest.TestCase):
     def test_class_attribute_docstring(self):
         class A:
             """This is a docstring."""
+
             pass
 
         instance = A()
@@ -832,6 +843,7 @@ class CommonXenoTests(unittest.TestCase):
             def wrapper(*args, **kwargs):
                 result = f(*args, **kwargs)
                 return str(result)
+
             return wrapper
 
         @injector.provide
@@ -873,7 +885,7 @@ class AsyncXenoTests(unittest.TestCase):
 
         injector = AsyncInjector(Test())
         start_time = datetime.now()
-        injector.require('target')
+        injector.require("target")
         end_time = datetime.now()
         self.assertTrue(end_time - start_time < timedelta(seconds=2))
 
@@ -889,13 +901,15 @@ class XenoBuildTests(unittest.TestCase):
 
         @engine.default
         def test_file(test_dir):
-            return xeno.build.sh(["touch", "{output}"],
-                                 test_dir=test_dir,
-                                 output=test_dir.output/'test.file')
+            return xeno.build.sh(
+                ["touch", "{output}"],
+                test_dir=test_dir,
+                output=test_dir.output / "test.file",
+            )
 
         recipe = engine.create()
-        test_dir = engine.load_recipe('test_dir')
-        test_file = engine.load_recipe('test_file')
+        test_dir = engine.load_recipe("test_dir")
+        test_file = engine.load_recipe("test_file")
         config = xeno.build.BuildConfig(debug=True, verbose=1)
         xeno.build.setup_default_watcher(recipe, config)
         print()
@@ -903,6 +917,16 @@ class XenoBuildTests(unittest.TestCase):
         self.assertTrue(recipe.done)
         asyncio.run(recipe.cleanup())
         self.assertFalse(recipe.done)
+
+
+# --------------------------------------------------------------------
+class XenoEnvironmentTests(unittest.TestCase):
+    def test_pkgconfig(self):
+        pyenv = PackageConfig("python3 >= 3.10")
+        self.assertTrue("python" in pyenv.cflags)
+        expected_cflags = pyenv.cflags + " -g -I./include"
+        newenv = pyenv + dict(CFLAGS=["-g", "-I./include"])
+        self.assertEqual(newenv["CFLAGS"], expected_cflags)
 
 
 # --------------------------------------------------------------------

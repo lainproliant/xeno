@@ -17,7 +17,28 @@ from typing import Any, Callable, Dict, Optional, Set, Tuple, Union, Iterable
 from xeno.utils import decode, is_iterable
 
 # --------------------------------------------------------------------
-EnvDict = Dict[str, Any]
+class Environment(dict[str, Any]):
+    """
+    An environment dictionary that knows how to append shell
+    flag variables together when added to other dictionaries.
+    """
+    @staticmethod
+    def context():
+        return Environment(os.environ)
+
+    def __add__(self, rhs: Any) -> 'Environment':
+        env = Environment()
+        for key, value in rhs.items():
+            if key in self:
+                if not is_iterable(value):
+                    value = shlex.split(value)
+                env[key] = shlex.join(shlex.split(self[key]) + value)
+            else:
+                env[key] = value
+        return env
+
+# --------------------------------------------------------------------
+EnvDict = Environment | Dict[str, Any]
 InputSource = Callable[[], str]
 LineSink = Callable[[str, asyncio.StreamWriter], None]
 OutputTaskData = Tuple[asyncio.StreamReader, LineSink]
@@ -119,7 +140,6 @@ class Shell:
         check=False,
         **params,
     ) -> int:
-
         rl_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
 
         def setup_rl_task(stream: asyncio.StreamReader, sink: LineSink):
