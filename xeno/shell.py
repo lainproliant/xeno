@@ -16,17 +16,19 @@ from typing import Any, Callable, Dict, Optional, Set, Tuple, Union, Iterable
 
 from xeno.utils import decode, is_iterable
 
+
 # --------------------------------------------------------------------
 class Environment(dict[str, Any]):
     """
     An environment dictionary that knows how to append shell
     flag variables together when added to other dictionaries.
     """
+
     @staticmethod
     def context():
         return Environment(os.environ)
 
-    def __add__(self, rhs: Any) -> 'Environment':
+    def __add__(self, rhs: Any) -> "Environment":
         env = Environment()
         for key, value in rhs.items():
             if key in self:
@@ -37,11 +39,14 @@ class Environment(dict[str, Any]):
                 env[key] = value
         return env
 
+
 # --------------------------------------------------------------------
 EnvDict = Environment | Dict[str, Any]
 InputSource = Callable[[], str]
 LineSink = Callable[[str, asyncio.StreamWriter], None]
 OutputTaskData = Tuple[asyncio.StreamReader, LineSink]
+PathSpec = Union[str | Path]
+
 
 # --------------------------------------------------------------------
 def digest_env(env: EnvDict):
@@ -74,9 +79,9 @@ def check(cmd: Union[str, Iterable[str]]):
 
 # --------------------------------------------------------------------
 class Shell:
-    def __init__(self, env: EnvDict = dict(os.environ), cwd: Optional[Path] = None):
+    def __init__(self, env: EnvDict = dict(os.environ), cwd: Optional[PathSpec] = None):
         self._env = digest_env(env)
-        self._cwd = cwd or Path.cwd()
+        self._cwd = Path(cwd) if cwd is not None else Path.cwd()
 
     def env(self, new_env: EnvDict):
         return Shell({**self._env, **new_env}, self._cwd)
@@ -126,7 +131,7 @@ class Shell:
             final_cmd = cmd.format(**self._env, **redacted_params)
         else:
             final_cmd = shlex.join(
-                [c.format(**self._env, **redacted_params) for c in cmd]
+                [str(c).format(**self._env, **redacted_params) for c in cmd]
             )
 
         return final_cmd
@@ -158,9 +163,7 @@ class Shell:
             setup_rl_task(proc.stderr, stderr)
 
         while rl_tasks:
-            done, pending = await asyncio.wait(
-                rl_tasks, return_when=asyncio.FIRST_COMPLETED
-            )
+            done, _ = await asyncio.wait(rl_tasks, return_when=asyncio.FIRST_COMPLETED)
 
             for future in done:
                 stream, sink = rl_tasks.pop(future)
@@ -185,7 +188,7 @@ class Shell:
         check=False,
         **params,
     ) -> int:
-        asyncio.run(self.run(cmd, stdin, stdout, stderr, check, **params))
+        return asyncio.run(self.run(cmd, stdin, stdout, stderr, check, **params))
 
     def interact(self, cmd: Union[str, Iterable[str]], check=False, **params) -> int:
         cmd = self.interpolate(cmd, params)

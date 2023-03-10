@@ -1,18 +1,29 @@
-import unittest
 import asyncio
+import os
+import random
+import shutil
+import sys
+import time
+import tracemalloc
+import unittest
+import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import cast
 
 from xeno import (
     AsyncInjector,
     CircularDependencyError,
+    ClassAttributes,
     InjectionError,
     InvalidResourceError,
-    ClassAttributes,
     MethodAttributes,
     MissingDependencyError,
     MissingResourceError,
     SyncInjector,
+    Tags,
     alias,
+    build,
     const,
     inject,
     named,
@@ -21,9 +32,14 @@ from xeno import (
     singleton,
     using,
 )
-
-import xeno.build
+from xeno.build import DefaultEngineHook, Engine
+from xeno.cookbook import sh
 from xeno.pkg_config import PackageConfig
+from xeno.recipe import BuildError, Recipe
+from xeno.testing import OutputCapture
+
+tracemalloc.start()
+Recipe.UNICODE_SUPPORT = False
 
 
 # --------------------------------------------------------------------
@@ -107,7 +123,7 @@ class CommonXenoTests(unittest.TestCase):
 
         injector = self.make_injector(Module())
         with self.assertRaises(MissingDependencyError) as context:
-            injector.require("MissingStuff/name")
+            asyncio.run(injector.require("MissingStuff/name"))
         self.assertTrue(context.exception.name, "MissingStuff/name")
         self.assertTrue(context.exception.dep_name, "last_name")
 
@@ -128,7 +144,7 @@ class CommonXenoTests(unittest.TestCase):
 
         injector = self.make_injector(Module())
         full_name = injector.require("NamesAndStuff/full_name")
-        self.assertTrue(full_name, "Lain Musgrove")
+        self.assertEqual(full_name, "Lain Musgrove")
 
     def test_illegal_ctor_injection(self):
         """Test to verify that a constructor with invalid param types
@@ -162,7 +178,7 @@ class CommonXenoTests(unittest.TestCase):
                 return "Musgrove"
 
             @provide
-            def full_name(self, *arg, name, last_name):
+            def full_name(self, *_, name, last_name):
                 return name + last_name
 
         class NamePrinter:
@@ -546,8 +562,8 @@ class CommonXenoTests(unittest.TestCase):
                 return 0
 
         injector = self.make_injector(ModuleA())
-        self.assertTrue(injector.get_resource_attributes("a").check("singleton"))
-        self.assertFalse(injector.get_resource_attributes("b").check("singleton"))
+        self.assertTrue(injector.get_resource_attributes("a").check(Tags.SINGLETON))
+        self.assertFalse(injector.get_resource_attributes("b").check(Tags.SINGLETON))
 
     def test_unbind_singletons(self):
         class ModuleA:
@@ -682,9 +698,12 @@ class CommonXenoTests(unittest.TestCase):
 
         injector = self.make_injector(Core(), Impl())
         ns = injector.get_namespace()
+        assert ns is not None
         recursive_list = ns.get_leaves(recursive=True)
         core_ns = ns.get_namespace("com/example/core")
         impl_ns = ns.get_namespace("com/example/impl")
+        assert core_ns is not None
+        assert impl_ns is not None
         core_list = core_ns.get_leaves()
         impl_list = impl_ns.get_leaves()
 
@@ -704,28 +723,30 @@ class CommonXenoTests(unittest.TestCase):
             @provide
             def apples(self):
                 attrs = MethodAttributes.for_method(self.apples)
+                assert attrs is not None
                 outerSelf.assertEqual(
-                    attrs.get("resource-name"), "com/example/core/apples"
+                    attrs.get(Tags.RESOURCE_FULL_NAME), "com/example/core/apples"
                 )
                 return "apples"
 
             @provide
             def oranges(self):
                 attrs = MethodAttributes.for_method(self.oranges)
+                assert attrs is not None
                 outerSelf.assertEqual(
-                    attrs.get("resource-name"), "com/example/core/oranges"
+                    attrs.get(Tags.RESOURCE_FULL_NAME), "com/example/core/oranges"
                 )
                 return "oranges"
 
         injector = self.make_injector(Core())
 
         def assert_resource_name(key, attrs):
-            self.assertEqual(key, attrs.get("resource-name"))
+            self.assertEqual(key, attrs.get(Tags.RESOURCE_FULL_NAME))
             return True
 
         injector.scan_resources(assert_resource_name)
         attrs = injector.get_resource_attributes("com/example/core/apples")
-        self.assertEqual(attrs.get("resource-name"), "com/example/core/apples")
+        self.assertEqual(attrs.get(Tags.RESOURCE_FULL_NAME), "com/example/core/apples")
 
     def test_inject_decorated_provider(self):
         def fancy(f):
@@ -812,9 +833,9 @@ class CommonXenoTests(unittest.TestCase):
         instance = A()
 
         attrs = ClassAttributes.for_class(A)
-        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is a docstring.")
         attrs = ClassAttributes.for_object(instance)
-        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is a docstring.")
 
     def test_method_attribute_docstring(self):
         class A:
@@ -829,11 +850,11 @@ class CommonXenoTests(unittest.TestCase):
             pass
 
         attrs = MethodAttributes.for_method(A.f)
-        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is a docstring.")
         attrs = MethodAttributes.for_method(instance.f)
-        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is a docstring.")
         attrs = MethodAttributes.for_method(bare_function)
-        self.assertEqual(attrs.get("doc"), "This is another doc string.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is another doc string.")
 
     def test_attribute_wrap_target_with_no_params(self):
         injector = self.make_injector()
@@ -891,35 +912,6 @@ class AsyncXenoTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------
-class XenoBuildTests(unittest.TestCase):
-    def test_deep_dependencies(self):
-        engine = xeno.build.BuildEngine()
-
-        @engine.provide
-        def test_dir():
-            return xeno.build.sh("mkdir {output}", output="__test__")
-
-        @engine.default
-        def test_file(test_dir):
-            return xeno.build.sh(
-                ["touch", "{output}"],
-                test_dir=test_dir,
-                output=test_dir.output / "test.file",
-            )
-
-        recipe = engine.create()
-        test_dir = engine.load_recipe("test_dir")
-        test_file = engine.load_recipe("test_file")
-        config = xeno.build.BuildConfig(debug=True, verbose=1)
-        xeno.build.setup_default_watcher(recipe, config)
-        print()
-        asyncio.run(recipe.resolve())
-        self.assertTrue(recipe.done)
-        asyncio.run(recipe.cleanup())
-        self.assertFalse(recipe.done)
-
-
-# --------------------------------------------------------------------
 class XenoEnvironmentTests(unittest.TestCase):
     def test_pkgconfig(self):
         pyenv = PackageConfig("python3 >= 3.10")
@@ -927,6 +919,237 @@ class XenoEnvironmentTests(unittest.TestCase):
         expected_cflags = pyenv.cflags + " -g -I./include"
         newenv = pyenv + dict(CFLAGS=["-g", "-I./include"])
         self.assertEqual(newenv["CFLAGS"], expected_cflags)
+
+
+# --------------------------------------------------------------------
+class XenoBuildTests(unittest.TestCase):
+    def on_event(self, event):
+        print(
+            f"{event.name} ({event.context.memoize}): {event.context.result_or(None)} @ {event.context.path()}: {event.data}"
+        )
+
+    def bus_hook(self, bus):
+        print()
+        bus.listen(self.on_event)
+
+    def test_basic_build(self):
+        engine = build.Engine()
+
+        @engine.recipe
+        def add(a, b):
+            return a + b
+
+        @engine.recipe
+        def add_and_two(a, b):
+            return add(add(a, b), 2)
+
+        @engine.target
+        def make_three():
+            return add(1, 2)
+
+        @engine.target
+        def make_five(make_three):
+            return add(2, make_three)
+
+        @engine.target(default=True)
+        def make_seven(make_five):
+            return add_and_two(make_five, 0)
+
+        result = engine.build()
+        self.assertEqual(result, [7])
+
+        result = engine.build("make_three", "make_five", "make_seven")
+        self.assertEqual(result, [3, 5, 7])
+
+    def test_shell_recipe_and_async_timing(self):
+        from xeno.build import build, provide, recipe, target
+        from xeno.cookbook import sh
+
+        sh.env = dict(CAT="cat")
+
+        @recipe(sigil=lambda r: f'{r.name}({r.arg("n")}, {r.arg("sec")})')
+        async def slowly_make_number(n, sec=1):
+            await asyncio.sleep(sec)
+            return n
+
+        @provide
+        def file():
+            return Path("/proc/cpuinfo")
+
+        @target
+        def print_file(file):
+            return sh("{CAT} {file}", file=file)
+
+        @target
+        def slow_number():
+            return slowly_make_number(99)
+
+        @target
+        def print_file_2(file):
+            return sh(["{CAT}", file], interact=True)
+
+        @target
+        def two_slow_numbers():
+            return [slowly_make_number(5, 2), slowly_make_number(10, 2)]
+
+        @target
+        def lots_of_slow_numbers():
+            return [slowly_make_number(x, random.randint(1, 4)) for x in range(0, 10)]
+
+        result = build("print_file", "slow_number")
+        self.assertEqual(result, [0, 99])
+
+        result = build("print_file_2", "slow_number")
+        self.assertEqual(result, [0, 99])
+
+        start_time = datetime.now()
+        result = build("two_slow_numbers")
+        self.assertEqual(result, [[5, 10]])
+        end_time = datetime.now()
+        self.assertTrue(end_time - start_time < timedelta(seconds=3))
+
+        result = build("lots_of_slow_numbers")
+
+    def test_file_target_recipes(self):
+        engine = Engine()
+
+        uid = str(uuid.uuid4())
+
+        try:
+
+            @engine.provide
+            def unique_name():
+                return str(uid)
+
+            @engine.recipe
+            def hello_file(out):
+                return sh(
+                    "echo 'Making a file...' && echo 'Hello, world!' > {out}",
+                    out=out,
+                )
+
+            @engine.target(keep=True)
+            def output_dir(unique_name):
+                return sh("mkdir {out}", out=Path("/tmp") / unique_name)
+
+            @engine.target(default=True)
+            def make_hello_file(output_dir):
+                return hello_file(output_dir / "hello.txt")
+
+            @engine.provide
+            def filenames():
+                return ["apples", "bananas", "oranges"]
+
+            @engine.target
+            def more_hello_files(filenames, output_dir):
+                return [hello_file(output_dir / name) for name in filenames]
+
+            result = engine.build()
+            self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
+            self.assertTrue(result[0].exists())
+
+            engine.build("-c")
+            self.assertFalse(result[0].exists())
+
+            result = engine.build()
+            self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
+            self.assertTrue(result[0].exists())
+
+            result = engine.build("-R")
+            self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
+            self.assertTrue(result[0].exists())
+
+            engine.build("-x")
+            self.assertFalse(result[0].exists())
+
+            print(engine.build("-l"))
+            print(engine.build("-L"))
+            print(engine.build("more_hello_files"))
+
+            print(engine.build("more_hello_files", "-c"))
+
+        finally:
+            if os.path.exists(f"/tmp/{uid}"):
+                shutil.rmtree(f"/tmp/{uid}")
+
+    def test_file_components_updated(self):
+        engine = Engine()
+        engine.add_hook(DefaultEngineHook())
+
+        uid = str(uuid.uuid4())
+        output_dir = Path("/tmp") / str(uid)
+
+        try:
+            output_dir.mkdir()
+
+            input_file = output_dir / "input.txt"
+            with open(input_file, "w") as outfile:
+                outfile.write("apples")
+
+            self.assertTrue(input_file.exists())
+            with open(input_file, "r") as infile:
+                self.assertEqual("apples", infile.read())
+
+            @engine.target
+            def copy_file():
+                return sh(
+                    "cat {input} >> {out}", input=input_file, out=output_dir / "out.txt"
+                )
+
+            copy_file_recipe = cast(Recipe, engine.injector.require("copy_file"))
+            self.assertFalse(copy_file_recipe.done())
+
+            engine.build("copy_file")
+            self.assertTrue(copy_file_recipe.done())
+
+            time.sleep(0.25)
+
+            now = datetime.now()
+            input_file = output_dir / "input.txt"
+            with open(input_file, "w") as outfile:
+                outfile.write("oranges")
+
+            time.sleep(0.25)
+
+            self.assertTrue(copy_file_recipe.done())
+            self.assertTrue(copy_file_recipe.outdated(now))
+
+            engine.build("copy_file")
+            now = datetime.now()
+            self.assertTrue(copy_file_recipe.done())
+            self.assertFalse(copy_file_recipe.outdated(now))
+
+        finally:
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+
+    def test_failed_build(self):
+        engine = Engine()
+        engine.add_hook(DefaultEngineHook())
+
+        @engine.recipe
+        def forced_failure():
+            return sh("exit 1")
+
+        @engine.target(default=True)
+        def default_target():
+            return forced_failure()
+
+        with self.assertRaises(BuildError):
+            engine.build()
+
+
+# --------------------------------------------------------------------
+class XenoTestingUtilsTests(unittest.TestCase):
+    def test_output_capture(self):
+        original_stdout = sys.stdout
+
+        with OutputCapture(stdout=True) as capture:
+            self.assertIs(sys.stdout, capture.stdout)
+            print("Hello!")
+            self.assertEqual(capture.stdout.getvalue(), "Hello!\n")
+
+        self.assertIs(sys.stdout, original_stdout)
 
 
 # --------------------------------------------------------------------

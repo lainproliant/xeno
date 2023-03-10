@@ -9,9 +9,10 @@
 
 
 from abc import ABCMeta, abstractmethod
-from typing import List, Set
+from typing import Any, List, Optional, Set
 
-from .attributes import ClassAttributes, NOTHING
+from .attributes import NOTHING, ClassAttributes, get_providers
+from .decorators import Tags
 from .errors import (
     CircularDependencyError,
     InjectionError,
@@ -20,7 +21,6 @@ from .errors import (
     MissingResourceError,
 )
 from .namespaces import Namespace
-from .attributes import get_providers
 
 
 # --------------------------------------------------------------------
@@ -51,7 +51,7 @@ class AbstractInjector(metaclass=ABCMeta):
                   More modules can be added later by calling
                   Injector.add_module().
         """
-        self.resources = {"injector": lambda: self}
+        self.resources: dict[str, Any] = {"injector": lambda: self}
         self.singletons = {}
         self.dep_graph = {}
         self.injection_interceptors = []
@@ -106,14 +106,16 @@ class AbstractInjector(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def provide(self, name_or_method, value=NOTHING, is_singleton=False, namespace=None):
+    def provide(
+        self, name_or_method, value=NOTHING, is_singleton=False, namespace=None
+    ):
         raise NotImplementedError()
 
     @abstractmethod
     def _bind_resource(self, bound_method, module_aliases={}, namespace=None):
         raise NotImplementedError()
 
-    def get_namespace(self, name=None):
+    def get_namespace(self, name=None) -> Optional[Namespace]:
         if name is None or name == Namespace.SEP:
             return self.ns_index
         return self.ns_index.get_namespace(name)
@@ -125,15 +127,16 @@ class AbstractInjector(metaclass=ABCMeta):
         the injector.
         """
         module_attrs = ClassAttributes.for_class(module.__class__)
-        namespace = module_attrs.get("namespace", None)
+        assert module_attrs is not None
+        namespace = module_attrs.get(Tags.NAMESPACE, None)
         using_namespaces = []
         if namespace is not None:
             using_namespaces.append(namespace)
             self.ns_index.add_namespace(namespace)
         module_aliases = self._get_aliases(module_attrs, using_namespaces)
-        for name, value in module_attrs.get("const_map", {}).items():
+        for name, value in module_attrs.get(Tags.CONST_MAP, {}).items():
             self.provide(name, value, is_singleton=True, namespace=namespace)
-        for attrs, provider in get_providers(module):
+        for _, provider in get_providers(module):
             self._bind_resource(provider, module_aliases, namespace)
 
         if not skip_cycle_check:
@@ -217,7 +220,7 @@ class AbstractInjector(metaclass=ABCMeta):
         else:
             if resource_name not in self.resources:
                 raise MissingResourceError(resource_name)
-            if not self.get_resource_attributes(resource_name).check("singleton"):
+            if not self.get_resource_attributes(resource_name).check(Tags.SINGLETON):
                 raise InvalidResourceError(
                     'Resource "%s" is not a singleton.' % resource_name
                 )
@@ -238,20 +241,22 @@ class AbstractInjector(metaclass=ABCMeta):
             visit(resource)
 
     def _get_aliases(self, attrs, namespaces=[]):
-        aliases = attrs.get("aliases", {})
+        aliases = attrs.get(Tags.ALIASES, {})
         for alias in aliases.keys():
             if Namespace.SEP in alias:
                 raise InjectionError(
                     "Alias name may not contain the namespace "
                     'separator: "%s"' % alias
                 )
-        using_namespaces = namespaces + attrs.get("using-namespaces", [])
-        for namespace in using_namespaces:
+        using_namespaces = namespaces + attrs.get(Tags.USING_NAMESPACES, [])
+        for ns_name in using_namespaces:
+            namespace = self.get_namespace(ns_name)
+            assert namespace is not None
             aliases = {
                 **aliases,
                 **{
-                    Namespace.leaf_name(name): name
-                    for name in self.ns_index.get_leaves(recursive=True)
+                    Namespace.leaf_name(name): Namespace.join(ns_name, name)
+                    for name in namespace.get_leaves()
                 },
             }
         return aliases

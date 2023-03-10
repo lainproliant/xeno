@@ -10,6 +10,7 @@
 import asyncio
 import inspect
 from collections import defaultdict
+from typing import Optional, cast
 
 from .abstract import AbstractInjector
 from .attributes import (
@@ -19,7 +20,7 @@ from .attributes import (
     get_injection_params,
     get_injection_points,
 )
-from .decorators import named, singleton
+from .decorators import Tags, named, singleton
 from .errors import (
     ClassInjectionError,
     MethodInjectionError,
@@ -33,7 +34,7 @@ from .utils import async_map, async_wrap, resolve_alias
 # --------------------------------------------------------------------
 class AsyncInjector(AbstractInjector):
     """
-    A specialization of AsyncInjector, and the classic Injector
+    A specialization of AbstractInjector, and the classic Injector
     which supports async providers and uses an asyncio event loop
     during dependency resolution.
 
@@ -64,6 +65,9 @@ class AsyncInjector(AbstractInjector):
         """
         Overrides: AbstractInjector
 
+        This method creates a new event loop.  If running from an existing
+        event loop, await `create_async` instead.
+
         Create an instance of the specified class.  The class' constructor
         must follow the rules for @inject methods, such that all of its
         parameters refer to injectable resources or are optional.
@@ -80,8 +84,6 @@ class AsyncInjector(AbstractInjector):
         Create an instance of the specified class.  The class' constructor
         must follow the rules for @inject methods, such that all of its
         parameters refer to injectable resources or are optional.
-
-        This async method is meant to be awaited from another coroutine.
 
         If the object needs to be constructed with objects not from the
         Injector, do not use this method.  Instead, instantiate the object
@@ -107,6 +109,9 @@ class AsyncInjector(AbstractInjector):
         """
         Overrides: AbstractInjector
 
+        This method creates a new event loop.  If running from an existing
+        event loop, await `inject_async` instead.
+
         Inject a method or object instance with resources from this Injector.
 
         obj: A method or object instance.  If this is a method, all named
@@ -117,11 +122,9 @@ class AsyncInjector(AbstractInjector):
         """
         return asyncio.run(self.inject_async(obj, aliases, namespace))
 
-    async def inject_async(self, obj, aliases={}, namespace=""):
+    async def inject_async(self, obj, aliases={}, namespace: Optional[str] = None):
         """
         Inject a method or object instance with resources from this Injector.
-
-        This async method is meant to be awaited from another coroutine.
 
         obj: A method or object instance.  If this is a method, all named
              parameters are injected from the Injector.  If this is an
@@ -130,18 +133,18 @@ class AsyncInjector(AbstractInjector):
         aliases: An optional map from dependency alias to real dependency name.
         """
         if inspect.isfunction(obj) or inspect.ismethod(obj):
-            return await self._inject_method(obj, aliases, namespace)
-        return await self._inject_instance(obj, aliases, namespace)
+            return await self._inject_method(obj, aliases, namespace or "")
+        return await self._inject_instance(obj, aliases, namespace or "")
 
     def require(self, name, method=None):
         """
         Overrides: AbstractInjector
 
+        This method creates a new event loop.  If running from an existing
+        event loop, await `require_async` instead.
+
         Require a named resource from this Injector.  If it can't be provided,
         an InjectionError is raised.
-
-        This method should only be called from outside of the asyncio
-        event loop.
 
         Optionally, a method can be specified.  This indicates the method that
         requires the resource for injection, and causes this method to throw
@@ -155,8 +158,6 @@ class AsyncInjector(AbstractInjector):
         Require a named resource from this Injector.  If it can't be provided,
         an InjectionError is raised.
 
-        This async method is meant to be awaited from another coroutine.
-
         Optionally, a method can be specified.  This indicates the method that
         requires the resource for injection, and causes this method to throw
         MethodInjectionError instead of InjectionError if the resource was
@@ -164,13 +165,29 @@ class AsyncInjector(AbstractInjector):
         """
         return await self._require_coro(name, method)
 
+    def provide(
+        self, name_or_method, value=NOTHING, is_singleton=False, namespace=None
+    ):
+        """
+        Overrides: AbstractInjector
+
+        This method creates a new event loop.  If running from an existing
+        event loop, await `provide_async` instead.
+        """
+
+        return asyncio.run(
+            self.provide_async(name_or_method, value, is_singleton, namespace)
+        )
+
     async def provide_async(
         self, name_or_method, value=NOTHING, is_singleton=False, namespace=None
     ):
 
         if inspect.ismethod(name_or_method) or inspect.isfunction(name_or_method):
             value = name_or_method
-            name = MethodAttributes.for_method(name_or_method).get("name")
+            attrs = MethodAttributes.for_method(name_or_method)
+            assert attrs is not None
+            name = attrs.get(Tags.NAME)
         elif value is NOTHING:
             raise ValueError("A name and value or just a method must be provided.")
         else:
@@ -192,45 +209,32 @@ class AsyncInjector(AbstractInjector):
                 wrapper = singleton(wrapper)
             await self._bind_resource_async(wrapper, namespace=namespace)
 
-    def provide(
-        self, name_or_method, value=NOTHING, is_singleton=False, namespace=None
-    ):
-        """
-        Overrides: AbstractInjector
-        """
-
-        return asyncio.run(
-            self.provide_async(name_or_method, value, is_singleton, namespace)
-        )
-
     async def _bind_resource_async(
         self, bound_method, module_aliases={}, namespace=None
     ):
         params, _ = get_injection_params(bound_method)
         attrs = MethodAttributes.for_method(bound_method)
+        assert attrs is not None
 
         using_namespaces = []
-        name = attrs.get("name")
+        name = cast(str, attrs.get(Tags.NAME))
+        assert name is not None
         # Allow names that begin with the namespace separator
         # to be scoped outside of the specified namespace.
         if name.startswith(Namespace.SEP):
-            name = name[len(Namespace.SEP) :]
+            name = name[len(Namespace.SEP):]
         elif namespace is not None:
             name = Namespace.join(namespace, name)
             using_namespaces.append(namespace)
 
-        def get_aliases(name):
-            aliases = {
-                **(self._get_aliases(attrs, using_namespaces) or {}),
-                **module_aliases,
-            }
-            return aliases
+        aliases = {
+            **(self._get_aliases(attrs, using_namespaces) or {}),
+            **module_aliases,
+        }
 
-        aliases = get_aliases(name)
         injected_method = await self.inject_async(bound_method, aliases, namespace)
 
-        if attrs.check("singleton"):
-
+        if attrs.check(Tags.SINGLETON):
             async def wrapper():
                 async with self.singleton_locks[name]:
                     if name not in self.singletons:
@@ -243,14 +247,13 @@ class AsyncInjector(AbstractInjector):
         else:
             resource = injected_method
 
-        # Make the canonical full resource name available via 'resource-name'.
-        attrs.put("resource-name", name)
+        attrs.put(Tags.RESOURCE_FULL_NAME, name)
 
         self.ns_index.add(name)
         self.resources[name] = resource
         self.resource_attrs[name] = attrs
         self.dep_graph[name] = lambda: [
-            resolve_alias(x, get_aliases(x)) for x in params
+            resolve_alias(x, aliases) for x in params
         ]
 
     def _bind_resource(self, bound_method, module_aliases={}, namespace=None):
@@ -266,9 +269,10 @@ class AsyncInjector(AbstractInjector):
     ):
         params, default_set = get_injection_params(f, unbound_ctor=unbound_ctor)
         attrs = MethodAttributes.for_method(f)
+        assert attrs is not None
         param_map: dict = {}
         param_resource_map = {}
-        full_name = attrs.get("name")
+        full_name = attrs.get(Tags.NAME)
         if namespace:
             full_name = Namespace.join(namespace, full_name)
             aliases = {**aliases, **self._get_aliases(attrs, [namespace])}
@@ -280,7 +284,7 @@ class AsyncInjector(AbstractInjector):
                     continue
                 resource_name = param
                 if resource_name.startswith(Namespace.SEP):
-                    resource_name = resource_name[len(Namespace.SEP) :]
+                    resource_name = resource_name[len(Namespace.SEP):]
                 resource_name = resolve_alias(resource_name, aliases)
                 resource_async_map[param] = self._require_coro(resource_name)
                 param_resource_map[param] = resource_name
@@ -297,8 +301,9 @@ class AsyncInjector(AbstractInjector):
 
     async def _inject_instance(self, instance, aliases={}, namespace=""):
         class_attributes = ClassAttributes.for_class(instance.__class__)
-        aliases = {**aliases, **class_attributes.get("aliases", {})}
-        for attrs, injection_point in get_injection_points(instance):
+        assert class_attributes is not None
+        aliases = {**aliases, **class_attributes.get(Tags.ALIASES, {})}
+        for _, injection_point in get_injection_points(instance):
             injected_method = await self.inject_async(
                 injection_point, aliases, namespace
             )
@@ -309,7 +314,8 @@ class AsyncInjector(AbstractInjector):
         async def wrapper():
             aliases = {**aliases_in}
             attrs = MethodAttributes.for_method(method)
-            aliases = {**aliases, **attrs.get("aliases", {})}
+            assert attrs is not None
+            aliases = {**aliases, **attrs.get(Tags.ALIASES, {})}
             param_map, alias_map = await self._resolve_dependencies(
                 method, aliases=aliases, namespace=namespace
             )
