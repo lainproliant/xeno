@@ -8,11 +8,24 @@
 # --------------------------------------------------------------------
 
 import asyncio
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Iterable, Optional
 
-Predicate = Callable[[], bool]
+from xeno.shell import Shell
+from xeno.events import send_event
+
+
+# --------------------------------------------------------------------
+class Events:
+    CLEAN = "clean"
+    DEBUG = "debug"
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
+    START = "start"
+    SUCCESS = "success"
 
 
 # --------------------------------------------------------------------
@@ -50,26 +63,49 @@ class Recipe:
     def _contextualize(self, s: str) -> str:
         return f"(for {self}) {s}"
 
+    def log(self, event: str, data: Any = None):
+        send_event(event, self, data)
+
     def error(self, msg) -> RuntimeError:
-        return RuntimeError(self._contextualize(msg))
+        exc = RuntimeError(self._contextualize(msg))
+        self.log(Events.ERROR, exc)
+        return exc
 
     def composite_error(self, exceptions: Iterable[Exception], msg: str):
-        return CompositeError(exceptions, self._contextualize(msg))
+        exc = CompositeError(exceptions, self._contextualize(msg))
+        self.log(Events.ERROR, exc)
+        return exc
 
-    def age(self) -> timedelta:
+    def age(self, ref: datetime) -> timedelta:
         return timedelta.max
 
-    def component_age(self) -> timedelta:
+    def component_age(self, ref: datetime) -> timedelta:
         if not self.components:
             return timedelta.max
         else:
-            return min(c.age() for c in self.components)
+            return min(min(c.age(ref), c.component_age(ref)) for c in self.components)
 
     def done(self) -> bool:
-        return (
-            all(c.done() for c in self.components)
-            and self.age() <= self.component_age()
+        return True
+
+    def components_done(self) -> bool:
+        return all(c.done() for c in self.components)
+
+    def outdated(self, ref: datetime) -> bool:
+        return self.age(ref) <= self.component_age(ref)
+
+    async def clean(self):
+        pass
+
+    async def clean_components(self):
+        results = await asyncio.gather(
+            *(c.clean() for c in self.components), return_exceptions=True
         )
+        exceptions = [e for e in results if isinstance(e, Exception)]
+        if exceptions:
+            raise self.composite_error(
+                exceptions, "Failed to clean one or more components."
+            )
 
     async def resolve(self) -> Any:
         if self.sync:
@@ -96,11 +132,63 @@ class Recipe:
 
     async def __call__(self) -> Any:
         async with self.lock:
-            if self.setup is not None and not self.setup.done():
+            if self.setup is not None:
                 try:
                     await self.setup()
 
                 except Exception as e:
                     raise self.error("Setup method failed.") from e
 
-            return await self.resolve()
+            result = await self.resolve()
+            if not self.done():
+                raise self.error("Recipe didn't complete successfully.")
+
+            self.log(Events.SUCCESS)
+            return result
+
+
+# --------------------------------------------------------------------
+class FileRecipe(Recipe):
+    def __init__(
+        self,
+        target: str | Path,
+        components: Optional[Iterable["Recipe"]] = None,
+        *,
+        setup: Optional["Recipe"] = None,
+        static=False,
+        sync=False,
+        user: Optional["str"] = None,
+    ):
+        assert not (static and components), "Static files can't have components."
+        super().__init__(components, setup=setup, sync=sync)
+        self.target = Path(target)
+        self.static = static
+        self.user = user
+
+    async def clean(self):
+        if self.static or not self.target.exists():
+            return
+        try:
+            if self.user:
+                result = Shell().interact_as(
+                    self.user, ["rm", "-rf", str(self.target.absolute())]
+                )
+                if result != 0:
+                    raise RuntimeError(
+                        f"Failed to delete `f{self.target}` as `f{self.user}`."
+                    )
+            else:
+                if self.target.is_dir():
+                    shutil.rmtree(self.target)
+                else:
+                    self.target.unlink()
+
+        except Exception as e:
+            raise self.error("Failed to clean.") from e
+
+        self.log(Events.CLEAN, self.target)
+
+    def age(self, ref: datetime) -> timedelta:
+        if not self.target.exists():
+            return timedelta.max
+        return ref - datetime.fromtimestamp(self.target.stat().st_mtime)

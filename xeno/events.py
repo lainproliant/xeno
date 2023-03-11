@@ -24,8 +24,9 @@ from xeno.utils import async_wrap
 @dataclass
 class Event:
     name: str
+    context: Any = None
+    data: Any = None
     when: datetime = field(default_factory=datetime.now)
-    data: Optional[Any] = None
 
     def age(self) -> timedelta:
         return datetime.now() - self.when
@@ -112,10 +113,10 @@ class EventBusContainer:
         if not self.bus:
             self.bus = EventBus()
 
-    def send_event(self, event: Event):
+    def send_event(self, name: str, ctx: Any = None, data: Any = None):
         if self.bus is None:
             return
-        self.bus.send(event)
+        self.bus.send(Event(name, ctx, data))
 
     def listen_events(self, listener: EventListener):
         self.get_event_bus().listen(listener)
