@@ -11,10 +11,11 @@ import asyncio
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Generator, Iterable, Optional
 
-from xeno.shell import Shell
 from xeno.events import send_event
+from xeno.shell import Shell
+from xeno.utils import async_wrap
 
 
 # --------------------------------------------------------------------
@@ -47,18 +48,28 @@ class CompositeError(Exception):
 
 
 # --------------------------------------------------------------------
+RecipeComponents = Iterable["Recipe"] | dict[str, "Recipe" | Iterable["Recipe"]]
+
+# --------------------------------------------------------------------
 class Recipe:
     def __init__(
         self,
-        components: Optional[Iterable["Recipe"]] = None,
+        components: RecipeComponents = {},
         *,
         setup: Optional["Recipe"] = None,
         sync=False,
+        memoize=False,
     ):
-        self.components = list(components or [])
+        if isinstance(components, dict):
+            self.component_map = components or {}
+        else:
+            self.component_map = {'args': components}
+
         self.lock = asyncio.Lock()
         self.setup = setup
         self.sync = sync
+        self.memoize = memoize
+        self.saved_result = None
 
     def _contextualize(self, s: str) -> str:
         return f"(for {self}) {s}"
@@ -71,25 +82,54 @@ class Recipe:
         self.log(Events.ERROR, exc)
         return exc
 
+    def has_components(self):
+        try:
+            next(self.components())
+            return True
+
+        except StopIteration:
+            return False
+
+    def components(self) -> Generator["Recipe", None, None]:
+        for c in self.component_map.values():
+            if isinstance(c, Recipe):
+                yield c
+            else:
+                yield from c
+
+    def __iter__(self):
+        yield from self.components()
+
     def composite_error(self, exceptions: Iterable[Exception], msg: str):
         exc = CompositeError(exceptions, self._contextualize(msg))
         self.log(Events.ERROR, exc)
         return exc
 
-    def age(self, ref: datetime) -> timedelta:
+    def age(self, _: datetime) -> timedelta:
         return timedelta.max
 
     def component_age(self, ref: datetime) -> timedelta:
-        if not self.components:
+        if not self.has_components():
             return timedelta.max
         else:
-            return min(min(c.age(ref), c.component_age(ref)) for c in self.components)
+            return min(min(c.age(ref), c.component_age(ref)) for c in self.components())
+
+    def component_results(self) -> dict[str, Any]:
+        results = {}
+
+        for k, c in self.component_map.items():
+            if isinstance(c, Recipe):
+                results[k] = c.result()
+            else:
+                results[k] = [r.result() for r in c]
+
+        return results
 
     def done(self) -> bool:
-        return True
+        return self.saved_result is not None
 
     def components_done(self) -> bool:
-        return all(c.done() for c in self.components)
+        return all(c.done() for c in self.components())
 
     def outdated(self, ref: datetime) -> bool:
         return self.age(ref) <= self.component_age(ref)
@@ -99,7 +139,7 @@ class Recipe:
 
     async def clean_components(self):
         results = await asyncio.gather(
-            *(c.clean() for c in self.components), return_exceptions=True
+            *(c.clean() for c in self.components()), return_exceptions=True
         )
         exceptions = [e for e in results if isinstance(e, Exception)]
         if exceptions:
@@ -107,31 +147,42 @@ class Recipe:
                 exceptions, "Failed to clean one or more components."
             )
 
-    async def resolve(self) -> Any:
+    async def make_components(self) -> Iterable[Any]:
         if self.sync:
             results = []
-            for c in self.components:
+            for c in self.components():
                 try:
                     results.append(await c())
 
                 except Exception as e:
-                    raise self.error("Failed to resolve component.") from e
+                    raise self.error("Failed to make component.") from e
 
             return results
 
         else:
             results = await asyncio.gather(
-                *(c() for c in self.components), return_exceptions=True
+                *(c() for c in self.components()), return_exceptions=True
             )
             exceptions = [e for e in results if isinstance(e, Exception)]
             if exceptions:
                 raise self.composite_error(
-                    exceptions, "Failed to resolve one or more components."
+                    exceptions, "Failed to make one or more components."
                 )
             return results
 
-    async def __call__(self) -> Any:
+    async def make(self):
+        return True
+
+    def result(self):
+        if self.saved_result is None:
+            raise ValueError("Recipe result has not yet been recorded.")
+        return self.saved_result
+
+    async def __call__(self):
         async with self.lock:
+            if self.memoize and self.saved_result is not None:
+                return self.saved_result
+
             if self.setup is not None:
                 try:
                     await self.setup()
@@ -139,11 +190,20 @@ class Recipe:
                 except Exception as e:
                     raise self.error("Setup method failed.") from e
 
-            result = await self.resolve()
+            await self.make_components()
+            result = await self.make()
+
+            if result is None:
+                raise self.error("Recipe make() function didn't return a value.")
+
+            self.saved_result = result
+
             if not self.done():
+                self.saved_result = None
                 raise self.error("Recipe didn't complete successfully.")
 
             self.log(Events.SUCCESS)
+
             return result
 
 
@@ -152,18 +212,25 @@ class FileRecipe(Recipe):
     def __init__(
         self,
         target: str | Path,
-        components: Optional[Iterable["Recipe"]] = None,
+        components: RecipeComponents = {},
         *,
-        setup: Optional["Recipe"] = None,
         static=False,
-        sync=False,
         user: Optional["str"] = None,
+        **kwargs,
     ):
         assert not (static and components), "Static files can't have components."
-        super().__init__(components, setup=setup, sync=sync)
+        super().__init__(components, **kwargs)
         self.target = Path(target)
         self.static = static
         self.user = user
+
+    def age(self, ref: datetime) -> timedelta:
+        if not self.target.exists():
+            return timedelta.max
+        return ref - datetime.fromtimestamp(self.target.stat().st_mtime)
+
+    def done(self):
+        return self.target.exists()
 
     async def clean(self):
         if self.static or not self.target.exists():
@@ -188,7 +255,43 @@ class FileRecipe(Recipe):
 
         self.log(Events.CLEAN, self.target)
 
-    def age(self, ref: datetime) -> timedelta:
-        if not self.target.exists():
-            return timedelta.max
-        return ref - datetime.fromtimestamp(self.target.stat().st_mtime)
+    async def make(self):
+        return self.target
+
+
+# --------------------------------------------------------------------
+class LambdaRecipe(Recipe):
+    def __init__(
+        self,
+        f: Callable,
+        components: RecipeComponents = {},
+        *,
+        pass_args=False,
+        pass_kwargs=False,
+        pass_recipes=False,
+        **kwargs,
+    ):
+        super().__init__(components, **kwargs)
+        self.f = f
+        self.pass_args = pass_args
+        self.pass_kwargs = pass_kwargs
+        self.pass_recipes = pass_recipes
+
+    async def make(self):
+        if self.pass_args:
+            if self.pass_recipes:
+                return await async_wrap(self.f, *self.components())
+            else:
+                return await async_wrap(self.f, *[c.result() for c in self.components()])
+
+        elif self.pass_kwargs:
+            if self.pass_recipes:
+                return await async_wrap(self.f, **self.component_map)
+            else:
+                return await async_wrap(self.f, **self.component_results())
+
+        else:
+            if self.pass_recipes:
+                return await async_wrap(self.f, list(self.components()))
+            else:
+                return await async_wrap(self.f)

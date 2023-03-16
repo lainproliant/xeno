@@ -158,7 +158,7 @@ class Shell:
             setup_rl_task(proc.stderr, stderr)
 
         while rl_tasks:
-            done, pending = await asyncio.wait(
+            done, _ = await asyncio.wait(
                 rl_tasks, return_when=asyncio.FIRST_COMPLETED
             )
 
@@ -185,7 +185,7 @@ class Shell:
         check=False,
         **params,
     ) -> int:
-        asyncio.run(self.run(cmd, stdin, stdout, stderr, check, **params))
+        return asyncio.run(self.run(cmd, stdin, stdout, stderr, check, **params))
 
     def interact(self, cmd: Union[str, Iterable[str]], check=False, **params) -> int:
         cmd = self.interpolate(cmd, params)
