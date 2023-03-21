@@ -8,13 +8,28 @@
 # --------------------------------------------------------------------
 
 import inspect
-from typing import List
-from .utils import get_params_from_signature, bind_unbound_method
-from .errors import InjectionError
+from typing import Any, List, cast
 
+from .errors import InjectionError
+from .utils import bind_unbound_method, get_params_from_signature
 
 # --------------------------------------------------------------------
 NOTHING = object()
+
+# --------------------------------------------------------------------
+class Tags:
+    ALIASES = "xeno.tags.aliases"
+    CONST_MAP = "xeno.tags.const_map"
+    DOCS = "xeno.tags.docs"
+    INJECTION_POINT = "xeno.tags.injection_point"
+    NAME = "xeno.tags.name"
+    NAMESPACE = "xeno.tags.namespace"
+    PARAMS = "xeno.tags.params"
+    PROVIDER = "xeno.tags.provider"
+    QUALNAME = "xeno.tags.qualname"
+    RESOURCE_FULL_NAME = "xeno.tags.resource_full_name"
+    SINGLETON = "xeno.tags.singleton"
+    USING_NAMESPACES = "xeno.tags.using_namespaces"
 
 
 # --------------------------------------------------------------------
@@ -23,8 +38,7 @@ class Attributes:
         self.attr_map = {}
 
     @staticmethod
-    def for_object(obj, create=True, write=False,
-                   factory=lambda: Attributes()):
+    def for_object(obj, create=True, write=False, factory=lambda x: Attributes()):
         try:
             return obj._attrs
 
@@ -36,7 +50,7 @@ class Attributes:
                 return attrs
             return None
 
-    def put(self, attr, value=True):
+    def put(self, attr, value: Any = True):
         self.attr_map[attr] = value
         return self
 
@@ -72,9 +86,9 @@ class ClassAttributes(Attributes):
 
     def __init__(self, class_):
         super().__init__()
-        self.put("name", class_.__name__)
-        self.put("qualname", class_.__qualname__)
-        self.put("doc", class_.__doc__)
+        self.put(Tags.NAME, class_.__name__)
+        self.put(Tags.QUALNAME, class_.__qualname__)
+        self.put(Tags.DOCS, class_.__doc__)
 
 
 # --------------------------------------------------------------------
@@ -89,7 +103,10 @@ class MethodAttributes(Attributes):
     def wraps(f1):
         def decorator(f2):
             attr1 = MethodAttributes.for_method(f1)
-            MethodAttributes.for_method(f2, write=True).merge(attr1)
+            attr2 = MethodAttributes.for_method(f2, write=True)
+            assert attr2 is not None
+            if attr1 is not None:
+                attr2.merge(attr1)
             return f2
 
         return decorator
@@ -98,6 +115,7 @@ class MethodAttributes(Attributes):
     def add(name, value=True):
         def decorator(f):
             attrs = MethodAttributes.for_method(f, write=True)
+            assert attrs is not None
             attrs.put(name, value)
             return f
 
@@ -105,10 +123,10 @@ class MethodAttributes(Attributes):
 
     def __init__(self, f):
         super().__init__()
-        self.put("name", f.__name__)
-        self.put("qualname", f.__qualname__)
-        self.put("params", get_params_from_signature(f))
-        self.put("doc", f.__doc__)
+        self.put(Tags.NAME, f.__name__)
+        self.put(Tags.QUALNAME, f.__qualname__)
+        self.put(Tags.PARAMS, get_params_from_signature(f))
+        self.put(Tags.DOCS, f.__doc__)
 
 
 # --------------------------------------------------------------------
@@ -136,8 +154,9 @@ def get_injection_params(f, unbound_ctor=False):
         return [], set()
 
     attr = MethodAttributes.for_method(f)
-    if attr.has("params"):
-        params = attr.get("params")
+    assert attr is not None
+    if attr.has(Tags.PARAMS):
+        params = cast(list, attr.get(Tags.PARAMS))
     else:
         params = get_params_from_signature(f)
 
@@ -148,8 +167,9 @@ def get_injection_params(f, unbound_ctor=False):
 
     for param in params:
         if param.kind in [
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                inspect.Parameter.KEYWORD_ONLY]:
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        ]:
             if param.default != param.empty:
                 default_param_set.add(param.name)
             injection_param_names.append(param.name)
@@ -157,8 +177,7 @@ def get_injection_params(f, unbound_ctor=False):
             raise InjectionError(
                 "Xeno only supports injection of POSITIONAL_OR_KEYWORD and "
                 "KEYWORD_ONLY arguments, %s arguments (%s of %s) "
-                "are not supported."
-                % (param.kind, param.name, f.__qualname__)
+                "are not supported." % (param.kind, param.name, f.__qualname__)
             )
     return injection_param_names, default_param_set
 
@@ -170,8 +189,7 @@ def scan_methods(obj, filter_f):
     and return them as a stream of tuples.
     """
     for class_ in inspect.getmro(obj.__class__):
-        for name, method in inspect.getmembers(class_,
-                                               predicate=inspect.isfunction):
+        for _, method in inspect.getmembers(class_, predicate=inspect.isfunction):
             attrs = MethodAttributes.for_method(method, create=False)
             if attrs is not None and filter_f(attrs):
                 yield (attrs, bind_unbound_method(obj, method))
@@ -184,7 +202,7 @@ def get_injection_points(obj):
     and return them as a stream of tuples.
     """
 
-    return scan_methods(obj, lambda attr: attr.check("injection-point"))
+    return scan_methods(obj, lambda attr: attr.check(Tags.INJECTION_POINT))
 
 
 # --------------------------------------------------------------------
@@ -194,4 +212,4 @@ def get_providers(obj):
     them as a stream of tuples.
     """
 
-    return scan_methods(obj, lambda attr: attr.check("provider"))
+    return scan_methods(obj, lambda attr: attr.check(Tags.PROVIDER))

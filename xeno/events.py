@@ -37,6 +37,29 @@ EventListener = Callable[[Event], Awaitable]
 
 # --------------------------------------------------------------------
 class EventBus:
+    _current_bus: Optional["EventBus"] = None
+
+    class _Session:
+        def __init__(self):
+            self.bus = EventBus()
+
+        def __enter__(self):
+            EventBus._current_bus = self.bus
+
+        def __exit__(self):
+            EventBus._current_bus = None
+            self.bus.shutdown_flag.set()
+
+    @staticmethod
+    def session():
+        return EventBus._Session()
+
+    @staticmethod
+    def get():
+        if EventBus._current_bus is None:
+            raise ValueError("There is no current event bus session.")
+        return EventBus._current_bus
+
     def __init__(self):
         self.queue: asyncio.Queue[Event] = asyncio.Queue()
         self.shutdown_flag = asyncio.Event()
@@ -94,49 +117,3 @@ class EventBus:
                 for listener in self._listeners_for_event(event)
             )
         )
-
-
-# --------------------------------------------------------------------
-class EventBusContainer:
-    def __init__(self):
-        self.bus: Optional[EventBus] = None
-
-    def set_event_bus(self, bus: EventBus):
-        self.bus = bus
-
-    def get_event_bus(self) -> EventBus:
-        if not self.bus:
-            raise ValueError("There is no event bus set.")
-        return self.bus
-
-    def setup_events(self):
-        if not self.bus:
-            self.bus = EventBus()
-
-    def send_event(self, name: str, ctx: Any = None, data: Any = None):
-        if self.bus is None:
-            return
-        self.bus.send(Event(name, ctx, data))
-
-    def listen_events(self, listener: EventListener):
-        self.get_event_bus().listen(listener)
-
-    def unlisten_events(self, listener: EventListener):
-        self.get_event_bus().unlisten(listener)
-
-    def subscribe_event(self, name: str, listener: EventListener):
-        self.get_event_bus().subscribe(name, listener)
-
-    def unsubscribe_event(self, name: str, listener: EventListener):
-        self.get_event_bus().unsubscribe(name, listener)
-
-
-_CONTAINER = EventBusContainer()
-setup_events = _CONTAINER.setup_events
-set_event_bus = _CONTAINER.set_event_bus
-get_event_bus = _CONTAINER.get_event_bus
-send_event = _CONTAINER.send_event
-listen_events = _CONTAINER.listen_events
-unlisten_events = _CONTAINER.unlisten_events
-subscribe_event = _CONTAINER.subscribe_event
-unsubscribe_event = _CONTAINER.unsubscribe_event

@@ -17,7 +17,6 @@ from xeno.events import send_event
 from xeno.shell import Shell
 from xeno.utils import async_wrap
 
-
 # --------------------------------------------------------------------
 class Events:
     CLEAN = "clean"
@@ -63,7 +62,7 @@ class Recipe:
         if isinstance(components, dict):
             self.component_map = components or {}
         else:
-            self.component_map = {'args': components}
+            self.component_map = {"args": components}
 
         self.lock = asyncio.Lock()
         self.setup = setup
@@ -260,38 +259,40 @@ class FileRecipe(Recipe):
 
 
 # --------------------------------------------------------------------
-class LambdaRecipe(Recipe):
+class Lambda(Recipe):
+    ARGS = 0x1
+    KWARGS = 0x4
+    RESULTS = 0x8
+
     def __init__(
         self,
         f: Callable,
         components: RecipeComponents = {},
         *,
-        pass_args=False,
-        pass_kwargs=False,
-        pass_recipes=False,
+        pflags=0,
         **kwargs,
     ):
         super().__init__(components, **kwargs)
         self.f = f
-        self.pass_args = pass_args
-        self.pass_kwargs = pass_kwargs
-        self.pass_recipes = pass_recipes
+        self.pflags = pflags
 
     async def make(self):
-        if self.pass_args:
-            if self.pass_recipes:
+        if self.pflags & self.ARGS:
+            if self.pflags & self.RESULTS:
+                return await async_wrap(
+                    self.f, *[c.result() for c in self.components()]
+                )
+            else:
                 return await async_wrap(self.f, *self.components())
-            else:
-                return await async_wrap(self.f, *[c.result() for c in self.components()])
 
-        elif self.pass_kwargs:
-            if self.pass_recipes:
-                return await async_wrap(self.f, **self.component_map)
-            else:
+        elif self.pflags & self.KWARGS:
+            if self.pflags & self.RESULTS:
                 return await async_wrap(self.f, **self.component_results())
+            else:
+                return await async_wrap(self.f, **self.component_map)
 
         else:
-            if self.pass_recipes:
+            if self.pflags & self.RESULTS:
                 return await async_wrap(self.f, list(self.components()))
             else:
                 return await async_wrap(self.f)

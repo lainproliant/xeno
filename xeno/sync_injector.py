@@ -8,11 +8,12 @@
 # --------------------------------------------------------------------
 
 import inspect
+from typing import Optional, cast
 
 from .abstract import AbstractInjector
 from .attributes import (NOTHING, ClassAttributes, MethodAttributes,
                          get_injection_params, get_injection_points)
-from .decorators import named, singleton
+from .decorators import Tags, named, singleton
 from .errors import (ClassInjectionError, MethodInjectionError,
                      MissingDependencyError, MissingResourceError)
 from .namespaces import Namespace
@@ -43,13 +44,13 @@ class SyncInjector(AbstractInjector):
         self._inject_instance(instance)
         return instance
 
-    def inject(self, obj, aliases={}, namespace=""):
+    def inject(self, obj, aliases={}, namespace: Optional[str] = None):
         """
         Overrides: AbstractInjector
         """
         if inspect.isfunction(obj) or inspect.ismethod(obj):
-            return self._inject_method(obj, aliases, namespace)
-        return self._inject_instance(obj, aliases, namespace)
+            return self._inject_method(obj, aliases, namespace or "")
+        return self._inject_instance(obj, aliases, namespace or "")
 
     def require(self, name, method=None):
         """
@@ -64,7 +65,9 @@ class SyncInjector(AbstractInjector):
 
         if inspect.ismethod(name_or_method) or inspect.isfunction(name_or_method):
             value = name_or_method
-            name = MethodAttributes.for_method(name_or_method).get('name')
+            attrs = MethodAttributes.for_method(name_or_method)
+            assert attrs is not None
+            name = attrs.get(Tags.NAME)
         elif value is NOTHING:
             raise ValueError("A name and value or just a method must be provided.")
         else:
@@ -92,9 +95,10 @@ class SyncInjector(AbstractInjector):
 
         params, _ = get_injection_params(bound_method)
         attrs = MethodAttributes.for_method(bound_method)
+        assert attrs is not None
 
         using_namespaces = []
-        name = attrs.get("name")
+        name = cast(str, attrs.get(Tags.NAME))
         # Allow names that begin with the namespace separator
         # to be scoped outside of the specified namespace.
         if name.startswith(Namespace.SEP):
@@ -103,18 +107,14 @@ class SyncInjector(AbstractInjector):
             name = Namespace.join(namespace, name)
             using_namespaces.append(namespace)
 
-        def get_aliases(name):
-            aliases = {
-                **(self._get_aliases(attrs, using_namespaces) or {}),
-                **module_aliases,
-            }
-            return aliases
+        aliases = {
+            **(self._get_aliases(attrs, using_namespaces) or {}),
+            **module_aliases,
+        }
 
-        aliases = get_aliases(name)
         injected_method = self.inject(bound_method, aliases, namespace)
 
-        if attrs.check("singleton"):
-
+        if attrs.check(Tags.SINGLETON):
             def wrapper():
                 if name not in self.singletons:
                     singleton = injected_method()
@@ -127,21 +127,22 @@ class SyncInjector(AbstractInjector):
             resource = injected_method
 
         # Make the canonical full resource name available via 'resource-name'.
-        attrs.put("resource-name", name)
+        attrs.put(Tags.RESOURCE_FULL_NAME, name)
 
         self.ns_index.add(name)
         self.resources[name] = resource
         self.resource_attrs[name] = attrs
         self.dep_graph[name] = lambda: [
-            resolve_alias(x, get_aliases(x)) for x in params
+            resolve_alias(x, aliases) for x in params
         ]
 
     def _resolve_dependencies(self, f, unbound_ctor=False, aliases={}, namespace=""):
         params, default_set = get_injection_params(f, unbound_ctor=unbound_ctor)
         attrs = MethodAttributes.for_method(f)
+        assert attrs is not None
         param_map = {}
         param_resource_map = {}
-        full_name = attrs.get("name")
+        full_name = attrs.get(Tags.NAME)
         if namespace:
             full_name = Namespace.join(namespace, full_name)
             aliases = {**aliases, **self._get_aliases(attrs, [namespace])}
@@ -176,8 +177,9 @@ class SyncInjector(AbstractInjector):
 
     def _inject_instance(self, instance, aliases={}, namespace=""):
         class_attributes = ClassAttributes.for_class(instance.__class__)
-        aliases = {**aliases, **class_attributes.get("aliases", {})}
-        for attrs, injection_point in get_injection_points(instance):
+        assert class_attributes is not None
+        aliases = {**aliases, **class_attributes.get(Tags.ALIASES, {})}
+        for _, injection_point in get_injection_points(instance):
             injected_method = self.inject(injection_point, aliases, namespace)
             injected_method()
         return instance
@@ -186,7 +188,8 @@ class SyncInjector(AbstractInjector):
         def wrapper():
             aliases = {**aliases_in}
             attrs = MethodAttributes.for_method(method)
-            aliases = {**aliases, **attrs.get("aliases", {})}
+            assert attrs is not None
+            aliases = {**aliases, **attrs.get(Tags.ALIASES, {})}
             param_map, alias_map = self._resolve_dependencies(
                 method, aliases=aliases, namespace=namespace
             )

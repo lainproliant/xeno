@@ -9,8 +9,7 @@
 
 import inspect
 
-from .attributes import ClassAttributes, MethodAttributes
-
+from .attributes import ClassAttributes, MethodAttributes, Tags
 
 # --------------------------------------------------------------------
 def singleton(f):
@@ -23,8 +22,9 @@ def singleton(f):
     """
 
     attrs = MethodAttributes.for_method(f, write=True)
-    attrs.put("singleton")
-    attrs.put("provider")
+    assert attrs is not None
+    attrs.put(Tags.SINGLETON)
+    attrs.put(Tags.PROVIDER)
     return f
 
 
@@ -39,7 +39,8 @@ def provide(f):
     """
 
     attrs = MethodAttributes.for_method(f, write=True)
-    attrs.put("provider")
+    assert attrs is not None
+    attrs.put(Tags.PROVIDER)
     return f
 
 
@@ -57,7 +58,8 @@ def inject(f):
     which can be overridden by resources in the injector.
     """
     attrs = MethodAttributes.for_method(f, write=True)
-    attrs.put("injection-point")
+    assert attrs is not None
+    attrs.put(Tags.INJECTION_POINT)
     return f
 
 
@@ -70,7 +72,8 @@ def named(name):
 
     def impl(f):
         attrs = MethodAttributes.for_method(f, write=True)
-        attrs.put("name", name)
+        assert attrs is not None
+        attrs.put(Tags.NAME, name)
         return f
 
     return impl
@@ -89,9 +92,10 @@ def alias(alias, name):
             attrs = ClassAttributes.for_class(obj, write=True)
         else:
             attrs = MethodAttributes.for_method(obj, write=True)
-        aliases = attrs.get("aliases", {})
+        assert attrs is not None
+        aliases = attrs.get(Tags.ALIASES, {})
         aliases[alias] = name
-        attrs.put("aliases", aliases)
+        attrs.put(Tags.ALIASES, aliases)
         return obj
 
     return impl
@@ -107,7 +111,8 @@ def namespace(name):
 
     def impl(class_):
         attrs = ClassAttributes.for_class(class_, write=True)
-        attrs.put("namespace", name)
+        assert attrs is not None
+        attrs.put(Tags.NAMESPACE, name)
         return class_
 
     return impl
@@ -122,9 +127,10 @@ def const(name, value):
 
     def impl(class_):
         attrs = ClassAttributes.for_class(class_, write=True)
-        const_map = attrs.get("const_map", {})
+        assert attrs is not None
+        const_map = attrs.get(Tags.CONST_MAP, {})
         const_map[name] = value
-        attrs.put("const_map", const_map)
+        attrs.put(Tags.CONST_MAP, const_map)
         return class_
 
     return impl
@@ -138,9 +144,10 @@ def using(name):
             attrs = ClassAttributes.for_class(obj, write=True)
         else:
             attrs = MethodAttributes.for_method(obj, write=True)
-        namespaces = attrs.get("using-namespaces", [])
+        assert attrs is not None
+        namespaces = attrs.get(Tags.USING_NAMESPACES, [])
         namespaces.append(name)
-        attrs.put("using-namespaces", namespaces)
+        attrs.put(Tags.USING_NAMESPACES, namespaces)
         return obj
 
     return impl

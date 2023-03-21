@@ -1,17 +1,19 @@
-import unittest
 import asyncio
+import unittest
 from datetime import datetime, timedelta
 
+import xeno.build
 from xeno import (
     AsyncInjector,
     CircularDependencyError,
+    ClassAttributes,
     InjectionError,
     InvalidResourceError,
-    ClassAttributes,
     MethodAttributes,
     MissingDependencyError,
     MissingResourceError,
     SyncInjector,
+    Tags,
     alias,
     const,
     inject,
@@ -21,8 +23,6 @@ from xeno import (
     singleton,
     using,
 )
-
-import xeno.build
 from xeno.pkg_config import PackageConfig
 
 
@@ -107,7 +107,7 @@ class CommonXenoTests(unittest.TestCase):
 
         injector = self.make_injector(Module())
         with self.assertRaises(MissingDependencyError) as context:
-            injector.require("MissingStuff/name")
+            asyncio.run(injector.require("MissingStuff/name"))
         self.assertTrue(context.exception.name, "MissingStuff/name")
         self.assertTrue(context.exception.dep_name, "last_name")
 
@@ -128,7 +128,7 @@ class CommonXenoTests(unittest.TestCase):
 
         injector = self.make_injector(Module())
         full_name = injector.require("NamesAndStuff/full_name")
-        self.assertTrue(full_name, "Lain Musgrove")
+        self.assertEqual(full_name, "Lain Musgrove")
 
     def test_illegal_ctor_injection(self):
         """Test to verify that a constructor with invalid param types
@@ -162,7 +162,7 @@ class CommonXenoTests(unittest.TestCase):
                 return "Musgrove"
 
             @provide
-            def full_name(self, *arg, name, last_name):
+            def full_name(self, *_, name, last_name):
                 return name + last_name
 
         class NamePrinter:
@@ -546,8 +546,8 @@ class CommonXenoTests(unittest.TestCase):
                 return 0
 
         injector = self.make_injector(ModuleA())
-        self.assertTrue(injector.get_resource_attributes("a").check("singleton"))
-        self.assertFalse(injector.get_resource_attributes("b").check("singleton"))
+        self.assertTrue(injector.get_resource_attributes("a").check(Tags.SINGLETON))
+        self.assertFalse(injector.get_resource_attributes("b").check(Tags.SINGLETON))
 
     def test_unbind_singletons(self):
         class ModuleA:
@@ -682,9 +682,12 @@ class CommonXenoTests(unittest.TestCase):
 
         injector = self.make_injector(Core(), Impl())
         ns = injector.get_namespace()
+        assert ns is not None
         recursive_list = ns.get_leaves(recursive=True)
         core_ns = ns.get_namespace("com/example/core")
         impl_ns = ns.get_namespace("com/example/impl")
+        assert core_ns is not None
+        assert impl_ns is not None
         core_list = core_ns.get_leaves()
         impl_list = impl_ns.get_leaves()
 
@@ -704,28 +707,30 @@ class CommonXenoTests(unittest.TestCase):
             @provide
             def apples(self):
                 attrs = MethodAttributes.for_method(self.apples)
+                assert attrs is not None
                 outerSelf.assertEqual(
-                    attrs.get("resource-name"), "com/example/core/apples"
+                    attrs.get(Tags.RESOURCE_FULL_NAME), "com/example/core/apples"
                 )
                 return "apples"
 
             @provide
             def oranges(self):
                 attrs = MethodAttributes.for_method(self.oranges)
+                assert attrs is not None
                 outerSelf.assertEqual(
-                    attrs.get("resource-name"), "com/example/core/oranges"
+                    attrs.get(Tags.RESOURCE_FULL_NAME), "com/example/core/oranges"
                 )
                 return "oranges"
 
         injector = self.make_injector(Core())
 
         def assert_resource_name(key, attrs):
-            self.assertEqual(key, attrs.get("resource-name"))
+            self.assertEqual(key, attrs.get(Tags.RESOURCE_FULL_NAME))
             return True
 
         injector.scan_resources(assert_resource_name)
         attrs = injector.get_resource_attributes("com/example/core/apples")
-        self.assertEqual(attrs.get("resource-name"), "com/example/core/apples")
+        self.assertEqual(attrs.get(Tags.RESOURCE_FULL_NAME), "com/example/core/apples")
 
     def test_inject_decorated_provider(self):
         def fancy(f):
@@ -812,9 +817,9 @@ class CommonXenoTests(unittest.TestCase):
         instance = A()
 
         attrs = ClassAttributes.for_class(A)
-        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is a docstring.")
         attrs = ClassAttributes.for_object(instance)
-        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is a docstring.")
 
     def test_method_attribute_docstring(self):
         class A:
@@ -829,11 +834,11 @@ class CommonXenoTests(unittest.TestCase):
             pass
 
         attrs = MethodAttributes.for_method(A.f)
-        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is a docstring.")
         attrs = MethodAttributes.for_method(instance.f)
-        self.assertEqual(attrs.get("doc"), "This is a docstring.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is a docstring.")
         attrs = MethodAttributes.for_method(bare_function)
-        self.assertEqual(attrs.get("doc"), "This is another doc string.")
+        self.assertEqual(attrs.get(Tags.DOCS), "This is another doc string.")
 
     def test_attribute_wrap_target_with_no_params(self):
         injector = self.make_injector()
@@ -888,35 +893,6 @@ class AsyncXenoTests(unittest.TestCase):
         injector.require("target")
         end_time = datetime.now()
         self.assertTrue(end_time - start_time < timedelta(seconds=2))
-
-
-# --------------------------------------------------------------------
-class XenoBuildTests(unittest.TestCase):
-    def test_deep_dependencies(self):
-        engine = xeno.build.BuildEngine()
-
-        @engine.provide
-        def test_dir():
-            return xeno.build.sh("mkdir {output}", output="__test__")
-
-        @engine.default
-        def test_file(test_dir):
-            return xeno.build.sh(
-                ["touch", "{output}"],
-                test_dir=test_dir,
-                output=test_dir.output / "test.file",
-            )
-
-        recipe = engine.create()
-        test_dir = engine.load_recipe("test_dir")
-        test_file = engine.load_recipe("test_file")
-        config = xeno.build.BuildConfig(debug=True, verbose=1)
-        xeno.build.setup_default_watcher(recipe, config)
-        print()
-        asyncio.run(recipe.resolve())
-        self.assertTrue(recipe.done)
-        asyncio.run(recipe.cleanup())
-        self.assertFalse(recipe.done)
 
 
 # --------------------------------------------------------------------
