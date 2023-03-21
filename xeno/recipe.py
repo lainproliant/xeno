@@ -13,9 +13,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional
 
-from xeno.events import send_event
+from xeno.events import EventBus, Event
 from xeno.shell import Shell
 from xeno.utils import async_wrap
+
 
 # --------------------------------------------------------------------
 class Events:
@@ -49,6 +50,7 @@ class CompositeError(Exception):
 # --------------------------------------------------------------------
 RecipeComponents = Iterable["Recipe"] | dict[str, "Recipe" | Iterable["Recipe"]]
 
+
 # --------------------------------------------------------------------
 class Recipe:
     def __init__(
@@ -73,8 +75,10 @@ class Recipe:
     def _contextualize(self, s: str) -> str:
         return f"(for {self}) {s}"
 
-    def log(self, event: str, data: Any = None):
-        send_event(event, self, data)
+    def log(self, event_name: str, data: Any = None):
+        bus = EventBus.get()
+        event = Event(event_name, self, data)
+        bus.send(event)
 
     def error(self, msg) -> RuntimeError:
         exc = RuntimeError(self._contextualize(msg))

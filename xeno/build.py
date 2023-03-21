@@ -7,27 +7,113 @@
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
 
+import asyncio
+from argparse import ArgumentParser
 from typing import Optional, cast
 
 # --------------------------------------------------------------------
 from xeno.async_injector import AsyncInjector
 from xeno.attributes import MethodAttributes
-from xeno.recipe import Recipe, Lambda
 from xeno.decorators import named
+from xeno.events import EventBus
+from xeno.recipe import Events, Lambda, Recipe
+
+
+# --------------------------------------------------------------------
+class Config:
+    class Mode:
+        BUILD = "build"
+        REBUILD = "rebuild"
+        CLEAN = "clean"
+        LIST = "list"
+        TREE = "tree"
+
+    class CleanupMode:
+        SHALLOW = "shallow"
+        RECURSIVE = "recursive"
+
+    def __init__(self, name):
+        self.name = name
+        self.mode = self.Mode.BUILD
+        self.cleanup_mode = self.CleanupMode.RECURSIVE
+        self.debug = False
+        self.force_color = False
+        self.max_shells: Optional[int] = None
+
+    def _argparser(self):
+        parser = ArgumentParser(description=self.name, add_help=True)
+        parser.add_argument("targets", nargs="*")
+        parser.add_argument(
+            "--clean",
+            "-c",
+            dest="mode",
+            action="store_const",
+            const=self.Mode.CLEAN,
+            help="Clean the specified targets and all of their inputs.",
+        )
+        parser.add_argument(
+            "--rebuild",
+            "-R",
+            dest="mode",
+            action="store_const",
+            const=self.Mode.REBUILD,
+            help="Clean the specified targets, then rebuild them.",
+        )
+        parser.add_argument(
+            "--verbose",
+            "-v",
+            action="count",
+            help="Print stdout (-v) and/or stderr (-vv) for live running commands.",
+        )
+        parser.add_argument(
+            "--list",
+            "-l",
+            dest="mode",
+            action="store_const",
+            const=self.Mode.LIST,
+            help="List all defined targets.",
+        )
+        parser.add_argument(
+            "--debug",
+            "-D",
+            action="store_true",
+            help="Print stack traces and other diagnostic info.",
+        )
+        parser.add_argument(
+            "--force-color",
+            action="store_true",
+            help="Force color output to non-tty.  Useful for IDEs.",
+        )
+        parser.add_argument(
+            "--max",
+            "-m",
+            dest="max_shells",
+            type=int,
+            default=None,
+            help="Set the max number of simultaneous live commands.",
+        )
+        parser.set_defaults(mode=self.Mode.BUILD)
+        return parser
+
+    def parse_args(self, *args):
+        self._argparser().parse_args(args, namespace=self)
+
 
 # --------------------------------------------------------------------
 class Engine:
-    TARGET_ATTR = "xeno.build.target"
-    DEFAULT_ATTR = "xeno.build.default"
+    class Attributes:
+        TARGET = "xeno.build.target"
+        DEFAULT = "xeno.build.default"
 
-    def __init__(self):
+    def __init__(self, name="Xeno v5 Build Engine"):
+        self.name = name
         self.injector = AsyncInjector()
 
     def targets(self) -> list[str]:
         return [
             k
             for k, _ in self.injector.scan_resources(
-                lambda _, v: v.check(self.TARGET_ATTR)
+                lambda _, v: v.check(self.Attributes.TARGET)
             )
         ]
 
@@ -35,7 +121,7 @@ class Engine:
         results = [
             k
             for k, _ in self.injector.scan_resources(
-                lambda _, v: v.check(self.DEFAULT_ATTR)
+                lambda _, v: v.check(self.Attributes.DEFAULT)
             )
         ]
         assert len(results) <= 1, "More than one default target specified."
@@ -52,7 +138,7 @@ class Engine:
         multi=False,
         default=False,
         sync=False,
-        memoize=False
+        memoize=False,
     ):
         """
         Decorator for defining a target recipe for a build.
@@ -97,9 +183,9 @@ class Engine:
 
             attrs = MethodAttributes.for_method(target_wrapper, True, True)
             assert attrs is not None
-            attrs.put(self.TARGET_ATTR)
+            attrs.put(self.Attributes.TARGET)
             if default:
-                attrs.put(self.DEFAULT_ATTR)
+                attrs.put(self.Attributes.DEFAULT)
             if name is not None:
                 target_wrapper = named(name)(target_wrapper)
             self.provide(target_wrapper)
@@ -107,5 +193,20 @@ class Engine:
 
         return wrapper
 
-    def build(self):
-        with
+    def _on_recipe_clean(self, event):
+        print(f"LRS-DEBUG: clean: {event}")
+
+    def _on_recipe_error(self, event):
+        print(f"LRS-DEBUG: error: {event}")
+
+    def _on_recipe_success(self, event):
+        print(f"LRS-DEBUG: success: {event}")
+
+    def build(self, *argv):
+        with EventBus.session():
+            bus = EventBus.get()
+            bus.subscribe(Events.CLEAN, self._on_recipe_clean)
+            bus.subscribe(Events.ERROR, self._on_recipe_error)
+            bus.subscribe(Events.SUCCESS, self._on_recipe_success)
+
+            asyncio.run(bus.run())

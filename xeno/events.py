@@ -33,7 +33,8 @@ class Event:
 
 
 # --------------------------------------------------------------------
-EventListener = Callable[[Event], Awaitable]
+EventListener = Callable[[Event], Any]
+
 
 # --------------------------------------------------------------------
 class EventBus:
@@ -46,12 +47,12 @@ class EventBus:
         def __enter__(self):
             EventBus._current_bus = self.bus
 
-        def __exit__(self):
+        def __exit__(self, *_):
             EventBus._current_bus = None
             self.bus.shutdown_flag.set()
 
     @staticmethod
-    def session():
+    def session() -> "EventBus._Session":
         return EventBus._Session()
 
     @staticmethod
@@ -117,3 +118,7 @@ class EventBus:
                 for listener in self._listeners_for_event(event)
             )
         )
+
+
+# --------------------------------------------------------------------
+event_session = EventBus.session
