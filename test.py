@@ -13,6 +13,7 @@ from xeno import (
     MissingDependencyError,
     MissingResourceError,
     SyncInjector,
+    build,
     Tags,
     alias,
     const,
@@ -25,6 +26,9 @@ from xeno import (
 )
 from xeno.pkg_config import PackageConfig
 
+
+import tracemalloc
+tracemalloc.start()
 
 # --------------------------------------------------------------------
 class CommonXenoTests(unittest.TestCase):
@@ -904,6 +908,24 @@ class XenoEnvironmentTests(unittest.TestCase):
         newenv = pyenv + dict(CFLAGS=["-g", "-I./include"])
         self.assertEqual(newenv["CFLAGS"], expected_cflags)
 
+
+# --------------------------------------------------------------------
+class XenoBuildTests(unittest.TestCase):
+    def test_basic_build(self):
+        engine = build.Engine()
+
+        @engine.recipe()
+        def add(a, b):
+            print('LRS-DEBUG: entered recipe add()')
+            return a + b
+
+        @engine.target(factory=True)
+        def make_three():
+            print('LRS-DEBUG: entered target make_three()')
+            return add(1, 2)
+
+        result = engine.build("make_three")
+        self.assertEqual(result, 3)
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":

@@ -8,8 +8,9 @@
 # --------------------------------------------------------------------
 
 import asyncio
+import sys
 from argparse import ArgumentParser
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 # --------------------------------------------------------------------
 from xeno.async_injector import AsyncInjector
@@ -17,6 +18,7 @@ from xeno.attributes import MethodAttributes
 from xeno.decorators import named
 from xeno.events import EventBus
 from xeno.recipe import Events, Lambda, Recipe
+from xeno.utils import async_map
 
 
 # --------------------------------------------------------------------
@@ -38,6 +40,7 @@ class Config:
         self.cleanup_mode = self.CleanupMode.RECURSIVE
         self.debug = False
         self.force_color = False
+        self.targets: list[str] = []
         self.max_shells: Optional[int] = None
 
     def _argparser(self):
@@ -96,7 +99,9 @@ class Config:
         return parser
 
     def parse_args(self, *args):
-        self._argparser().parse_args(args, namespace=self)
+        argv = [*(args if len(args) > 0 else sys.argv)]
+        self._argparser().parse_args(argv, namespace=self)
+        return self
 
 
 # --------------------------------------------------------------------
@@ -130,18 +135,22 @@ class Engine:
     def provide(self, *args, **kwargs):
         self.injector.provide(*args, **{**kwargs, "is_singleton": True})
 
-    def target(
+    def recipe(
         self,
         name: Optional[str] = None,
         *,
         factory=False,
         multi=False,
-        default=False,
         sync=False,
         memoize=False,
     ):
         """
-        Decorator for defining a target recipe for a build.
+        Decorator for a function that defines a recipe template.
+
+        The function is meant to be a recipe implementation method.  The
+        parameters eventually passed to the method depend on whether the
+        parameters are recipes or plain values.  Each recipe parameter has its
+        result passed, whereas plain values are passed through unmodified.
 
         If `factory` or `multi` are true, the function is a recipe factory
         that returns one or more recipes and the values passed to it
@@ -155,32 +164,72 @@ class Engine:
         method and the values passed to it when it is eventually called
         are the result values of its dependencies.
 
-        If `default` is True, the target will be the default target
-        when no target is specified at build time.  This method will
-        throw ValueError if another target has already been specified
-        as the default target.
+        If `sync` is provided, the resulting recipe's dependencies are resolved
+        synchronously.  Otherwise, they are resolved asynchronously using
+        asyncio.gather().
+
+        If `memoize` is provided, the recipe result is not recalculated by
+        other dependencies, and the recipe implementation will only be
+        evaluated once.
         """
 
         def wrapper(f):
             @MethodAttributes.wraps(f)
-            async def target_wrapper(*args, **kwargs):
+            def target_wrapper(**kwargs):
+                truename = name or f.__name__
                 if factory or multi:
                     if multi:
-                        return Recipe(f(*args, **kwargs), sync=sync, memoize=memoize)
+                        return Recipe(
+                            [f(**kwargs)],
+                            name=truename,
+                            sync=sync,
+                            memoize=memoize,
+                        )
                     else:
-                        result = cast(Recipe, f(*args, **kwargs))
+                        result = cast(Recipe, f(**kwargs))
                         result.sync = sync
                         result.memoize = memoize
+                        result.name = truename
                         return result
 
                 return Lambda(
                     f,
                     kwargs,
                     pflags=Lambda.KWARGS & Lambda.RESULTS,
+                    name=truename,
                     sync=sync,
                     memoize=memoize,
                 )
 
+            return target_wrapper
+
+        return wrapper
+
+    def target(
+        self,
+        name: Optional[str] = None,
+        *,
+        factory=False,
+        multi=False,
+        default=False,
+        sync=False,
+        memoize=False,
+    ):
+        """
+        Decorator for defining a target recipe for a build.
+
+        If `default` is True, the target will be the default target
+        when no target is specified at build time.  This method will
+        throw ValueError if another target has already been specified
+        as the default target.
+
+        See `doc(xeno.build.Engine.recipe)` for info about the other params.
+        """
+
+        def wrapper(f):
+            target_wrapper = self.recipe(
+                name, factory=factory, multi=multi, sync=sync, memoize=memoize
+            )(f)
             attrs = MethodAttributes.for_method(target_wrapper, True, True)
             assert attrs is not None
             attrs.put(self.Attributes.TARGET)
@@ -202,11 +251,27 @@ class Engine:
     def _on_recipe_success(self, event):
         print(f"LRS-DEBUG: success: {event}")
 
-    def build(self, *argv):
+    async def build_async(self, *argv) -> list[Any]:
         with EventBus.session():
             bus = EventBus.get()
             bus.subscribe(Events.CLEAN, self._on_recipe_clean)
             bus.subscribe(Events.ERROR, self._on_recipe_error)
             bus.subscribe(Events.SUCCESS, self._on_recipe_success)
 
-            asyncio.run(bus.run())
+            config = Config("Xeno Build Engine v5").parse_args(*argv)
+            targets = await asyncio.gather(
+                *[
+                    async_map(name, self.injector.require_async(name))
+                    for name in config.targets
+                ]
+            )
+
+            for name, target in targets:
+                assert isinstance(
+                    target, Recipe
+                ), f"Target `{name}` did not yield a recipe."
+
+            return await asyncio.gather(*[v() for _, v in targets])
+
+    def build(self, *argv):
+        return asyncio.run(self.build_async(*argv))

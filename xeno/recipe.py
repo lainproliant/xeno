@@ -58,6 +58,7 @@ class Recipe:
         components: RecipeComponents = {},
         *,
         setup: Optional["Recipe"] = None,
+        name="Nameless Recipe",
         sync=False,
         memoize=False,
     ):
@@ -68,6 +69,7 @@ class Recipe:
 
         self.lock = asyncio.Lock()
         self.setup = setup
+        self.name = name
         self.sync = sync
         self.memoize = memoize
         self.saved_result = None
@@ -272,10 +274,11 @@ class Lambda(Recipe):
         self,
         f: Callable,
         components: RecipeComponents = {},
-        *,
         pflags=0,
         **kwargs,
     ):
+        if 'name' not in kwargs:
+            kwargs = {**kwargs, 'name': f.__name__}
         super().__init__(components, **kwargs)
         self.f = f
         self.pflags = pflags
@@ -299,4 +302,5 @@ class Lambda(Recipe):
             if self.pflags & self.RESULTS:
                 return await async_wrap(self.f, list(self.components()))
             else:
+                print(f'LRS-DEBUG: components = {list(self.components())}')
                 return await async_wrap(self.f)

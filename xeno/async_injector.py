@@ -65,6 +65,9 @@ class AsyncInjector(AbstractInjector):
         """
         Overrides: AbstractInjector
 
+        This method creates a new event loop.  If running from an existing
+        event loop, await `create_async` instead.
+
         Create an instance of the specified class.  The class' constructor
         must follow the rules for @inject methods, such that all of its
         parameters refer to injectable resources or are optional.
@@ -81,8 +84,6 @@ class AsyncInjector(AbstractInjector):
         Create an instance of the specified class.  The class' constructor
         must follow the rules for @inject methods, such that all of its
         parameters refer to injectable resources or are optional.
-
-        This async method is meant to be awaited from another coroutine.
 
         If the object needs to be constructed with objects not from the
         Injector, do not use this method.  Instead, instantiate the object
@@ -108,6 +109,9 @@ class AsyncInjector(AbstractInjector):
         """
         Overrides: AbstractInjector
 
+        This method creates a new event loop.  If running from an existing
+        event loop, await `inject_async` instead.
+
         Inject a method or object instance with resources from this Injector.
 
         obj: A method or object instance.  If this is a method, all named
@@ -121,8 +125,6 @@ class AsyncInjector(AbstractInjector):
     async def inject_async(self, obj, aliases={}, namespace: Optional[str] = None):
         """
         Inject a method or object instance with resources from this Injector.
-
-        This async method is meant to be awaited from another coroutine.
 
         obj: A method or object instance.  If this is a method, all named
              parameters are injected from the Injector.  If this is an
@@ -138,11 +140,11 @@ class AsyncInjector(AbstractInjector):
         """
         Overrides: AbstractInjector
 
+        This method creates a new event loop.  If running from an existing
+        event loop, await `require_async` instead.
+
         Require a named resource from this Injector.  If it can't be provided,
         an InjectionError is raised.
-
-        This method should only be called from outside of the asyncio
-        event loop.
 
         Optionally, a method can be specified.  This indicates the method that
         requires the resource for injection, and causes this method to throw
@@ -156,14 +158,26 @@ class AsyncInjector(AbstractInjector):
         Require a named resource from this Injector.  If it can't be provided,
         an InjectionError is raised.
 
-        This async method is meant to be awaited from another coroutine.
-
         Optionally, a method can be specified.  This indicates the method that
         requires the resource for injection, and causes this method to throw
         MethodInjectionError instead of InjectionError if the resource was
         not provided.
         """
         return await self._require_coro(name, method)
+
+    def provide(
+        self, name_or_method, value=NOTHING, is_singleton=False, namespace=None
+    ):
+        """
+        Overrides: AbstractInjector
+
+        This method creates a new event loop.  If running from an existing
+        event loop, await `provide_async` instead.
+        """
+
+        return asyncio.run(
+            self.provide_async(name_or_method, value, is_singleton, namespace)
+        )
 
     async def provide_async(
         self, name_or_method, value=NOTHING, is_singleton=False, namespace=None
@@ -194,17 +208,6 @@ class AsyncInjector(AbstractInjector):
             if is_singleton:
                 wrapper = singleton(wrapper)
             await self._bind_resource_async(wrapper, namespace=namespace)
-
-    def provide(
-        self, name_or_method, value=NOTHING, is_singleton=False, namespace=None
-    ):
-        """
-        Overrides: AbstractInjector
-        """
-
-        return asyncio.run(
-            self.provide_async(name_or_method, value, is_singleton, namespace)
-        )
 
     async def _bind_resource_async(
         self, bound_method, module_aliases={}, namespace=None
