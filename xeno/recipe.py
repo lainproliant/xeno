@@ -12,10 +12,11 @@ import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional
+from enum import Enum
 
 from xeno.events import EventBus, Event
 from xeno.shell import Shell
-from xeno.utils import async_wrap
+from xeno.utils import async_wrap, is_iterable
 
 
 # --------------------------------------------------------------------
@@ -48,24 +49,108 @@ class CompositeError(Exception):
 
 
 # --------------------------------------------------------------------
-RecipeComponents = Iterable["Recipe"] | dict[str, "Recipe" | Iterable["Recipe"]]
+ListedComponents = Iterable["Recipe"]
+MappedComponents = dict[str, "Recipe" | Iterable["Recipe"]]
 
 
 # --------------------------------------------------------------------
 class Recipe:
+    class PassMode(Enum):
+        NORMAL = 0
+        RESULTS = 1
+
+    class Scanner:
+        def __init__(self):
+            self._args: list[Any] = []
+            self._kwargs: dict[str, Any] = {}
+            self._arg_offsets: list[int] = []
+            self._kwarg_keys: list[str] = []
+
+        def _scan_one(self, arg) -> tuple[Any, bool]:
+            if isinstance(arg, Recipe):
+                return arg, True
+
+            if is_iterable(arg):
+                arg = [*arg]
+                if all(isinstance(x, Recipe) for x in arg):
+                    return arg, True
+
+            return arg, False
+
+        def has_recipes(self):
+            return self._arg_offsets or self._kwarg_keys
+
+        def scan_args(self, *args):
+            for i, arg in enumerate(args):
+                self.scan(arg, offset=i)
+
+        def scan_kwargs(self, **kwargs):
+            for k, arg in kwargs.items():
+                self.scan(arg, key=k)
+
+        def scan_args_kwargs(self, *args, **kwargs):
+            self.scan_args(*args)
+            self.scan_kwargs(**kwargs)
+
+        def scan(
+            self, arg, offset: Optional[int] = None, key: Optional[str] = None
+        ) -> bool:
+            arg, is_recipe = self._scan_one(arg)
+
+            if offset is not None:
+                self._args.append(arg)
+                if is_recipe:
+                    self._arg_offsets.append(offset)
+
+            elif key is not None:
+                self._kwargs[key] = arg
+                if is_recipe:
+                    self._kwarg_keys.append(key)
+
+            return is_recipe
+
+        def args(self, pass_mode: "Recipe.PassMode") -> list[Any]:
+            if pass_mode == Recipe.PassMode.NORMAL:
+                return self._args
+            results = [*self._args]
+            for offset in self._arg_offsets:
+                value = results[offset]
+                if is_iterable(value):
+                    results[offset] = [r.result() for r in value]
+                else:
+                    results[offset] = value.result()
+            return results
+
+        def kwargs(self, pass_mode: "Recipe.PassMode") -> dict[str, Any]:
+            if pass_mode == Recipe.PassMode.NORMAL:
+                return self._kwargs
+            results = {**self._kwargs}
+            for key in self._kwarg_keys:
+                value = results[key]
+                if is_iterable(value):
+                    results[key] = [r.result() for r in value]
+                else:
+                    results[key] = value.result()
+            return results
+
+        def component_list(self) -> ListedComponents:
+            return [self._args[x] for x in self._arg_offsets]
+
+        def component_map(self) -> MappedComponents:
+            return {k: self._kwargs[k] for k in self._kwarg_keys}
+
     def __init__(
         self,
-        components: RecipeComponents = {},
+        component_list: ListedComponents = [],
+        component_map: MappedComponents = {},
         *,
         setup: Optional["Recipe"] = None,
         name="Nameless Recipe",
         sync=False,
         memoize=False,
     ):
-        if isinstance(components, dict):
-            self.component_map = components or {}
-        else:
-            self.component_map = {"args": components}
+        self.component_list = component_list
+        self.component_map = component_map
 
         self.lock = asyncio.Lock()
         self.setup = setup
@@ -73,6 +158,28 @@ class Recipe:
         self.sync = sync
         self.memoize = memoize
         self.saved_result = None
+
+    @staticmethod
+    def scan(args: list[Any], kwargs: dict[str, Any]) -> Scanner:
+        """
+        Scan the given arguments for recipes, and return a tuple of offsets
+        and keys where the recipes or recipe lists were found.
+
+        Iterators are copied and instances of generators are expanded.
+
+        Returns the scan results, consisting of a new args, kwargs, and lists
+        of offsets and keys where recipes or recipe lists can be found.
+        """
+
+        scanner = Recipe.Scanner()
+
+        for i, arg in enumerate(args):
+            scanner.scan(arg, offset=i)
+
+        for k, arg in kwargs.items():
+            scanner.scan(arg, key=k)
+
+        return scanner
 
     def _contextualize(self, s: str) -> str:
         return f"(for {self}) {s}"
@@ -96,6 +203,7 @@ class Recipe:
             return False
 
     def components(self) -> Generator["Recipe", None, None]:
+        yield from self.component_list
         for c in self.component_map.values():
             if isinstance(c, Recipe):
                 yield c
@@ -119,16 +227,17 @@ class Recipe:
         else:
             return min(min(c.age(ref), c.component_age(ref)) for c in self.components())
 
-    def component_results(self) -> dict[str, Any]:
-        results = {}
+    def component_results(self) -> tuple[list[Any], dict[str, Any]]:
+        results = [c.result() for c in self.component_list]
+        mapped_results = {}
 
         for k, c in self.component_map.items():
             if isinstance(c, Recipe):
-                results[k] = c.result()
+                mapped_results[k] = c.result()
             else:
-                results[k] = [r.result() for r in c]
+                mapped_results[k] = [r.result() for r in c]
 
-        return results
+        return results, mapped_results
 
     def done(self) -> bool:
         return self.saved_result is not None
@@ -152,7 +261,7 @@ class Recipe:
                 exceptions, "Failed to clean one or more components."
             )
 
-    async def make_components(self) -> Iterable[Any]:
+    async def make_components(self) -> tuple[list[Any], dict[str, Any]]:
         if self.sync:
             results = []
             for c in self.components():
@@ -162,7 +271,7 @@ class Recipe:
                 except Exception as e:
                     raise self.error("Failed to make component.") from e
 
-            return results
+            return self.component_results()
 
         else:
             results = await asyncio.gather(
@@ -173,7 +282,7 @@ class Recipe:
                 raise self.composite_error(
                     exceptions, "Failed to make one or more components."
                 )
-            return results
+            return self.component_results()
 
     async def make(self):
         return True
@@ -195,17 +304,26 @@ class Recipe:
                 except Exception as e:
                     raise self.error("Setup method failed.") from e
 
+            self.log(Events.START)
+
             await self.make_components()
             result = await self.make()
+            scanner = Recipe.Scanner()
+
+            if scanner.scan(result):
+                self.log(
+                    Events.WARNING,
+                    "Recipe make() returned one or more other recipes, it should probably be a factory.",
+                )
 
             if result is None:
-                raise self.error("Recipe make() function didn't return a value.")
+                raise self.error("Recipe make() didn't return a value.")
 
             self.saved_result = result
 
             if not self.done():
                 self.saved_result = None
-                raise self.error("Recipe didn't complete successfully.")
+                raise self.error("Recipe make() didn't complete successfully.")
 
             self.log(Events.SUCCESS)
 
@@ -217,14 +335,17 @@ class FileRecipe(Recipe):
     def __init__(
         self,
         target: str | Path,
-        components: RecipeComponents = {},
+        component_list: ListedComponents = [],
+        component_map: MappedComponents = {},
         *,
         static=False,
         user: Optional["str"] = None,
         **kwargs,
     ):
-        assert not (static and components), "Static files can't have components."
-        super().__init__(components, **kwargs)
+        assert not (
+            static and (component_list or component_map)
+        ), "Static files can't have components."
+        super().__init__(component_list, component_map, **kwargs)
         self.target = Path(target)
         self.static = static
         self.user = user
@@ -266,41 +387,27 @@ class FileRecipe(Recipe):
 
 # --------------------------------------------------------------------
 class Lambda(Recipe):
-    ARGS = 0x1
-    KWARGS = 0x4
-    RESULTS = 0x8
-
     def __init__(
         self,
         f: Callable,
-        components: RecipeComponents = {},
-        pflags=0,
+        lambda_args: list[Any],
+        lambda_kwargs: dict[str, Any],
+        pass_mode=Recipe.PassMode.RESULTS,
         **kwargs,
     ):
-        if 'name' not in kwargs:
-            kwargs = {**kwargs, 'name': f.__name__}
-        super().__init__(components, **kwargs)
+        if "name" not in kwargs:
+            kwargs = {**kwargs, "name": f.__name__}
+
+        scanner = Recipe.scan(lambda_args, lambda_kwargs)
+
+        super().__init__(scanner.component_list(), scanner.component_map(), **kwargs)
         self.f = f
-        self.pflags = pflags
+        self.pass_mode = pass_mode
+        self.scanner = scanner
 
     async def make(self):
-        if self.pflags & self.ARGS:
-            if self.pflags & self.RESULTS:
-                return await async_wrap(
-                    self.f, *[c.result() for c in self.components()]
-                )
-            else:
-                return await async_wrap(self.f, *self.components())
-
-        elif self.pflags & self.KWARGS:
-            if self.pflags & self.RESULTS:
-                return await async_wrap(self.f, **self.component_results())
-            else:
-                return await async_wrap(self.f, **self.component_map)
-
-        else:
-            if self.pflags & self.RESULTS:
-                return await async_wrap(self.f, list(self.components()))
-            else:
-                print(f'LRS-DEBUG: components = {list(self.components())}')
-                return await async_wrap(self.f)
+        return await async_wrap(
+            self.f,
+            *self.scanner.args(self.pass_mode),
+            **self.scanner.kwargs(self.pass_mode),
+        )

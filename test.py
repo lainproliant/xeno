@@ -2,7 +2,6 @@ import asyncio
 import unittest
 from datetime import datetime, timedelta
 
-import xeno.build
 from xeno import (
     AsyncInjector,
     CircularDependencyError,
@@ -916,16 +915,18 @@ class XenoBuildTests(unittest.TestCase):
 
         @engine.recipe()
         def add(a, b):
-            print('LRS-DEBUG: entered recipe add()')
             return a + b
 
         @engine.target(factory=True)
         def make_three():
-            print('LRS-DEBUG: entered target make_three()')
             return add(1, 2)
 
-        result = engine.build("make_three")
-        self.assertEqual(result, 3)
+        @engine.target(default=True, factory=True)
+        def make_five(make_three):
+            return add(2, make_three)
+
+        result = engine.build()
+        self.assertEqual(result, [5])
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":

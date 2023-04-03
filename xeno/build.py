@@ -99,8 +99,7 @@ class Config:
         return parser
 
     def parse_args(self, *args):
-        argv = [*(args if len(args) > 0 else sys.argv)]
-        self._argparser().parse_args(argv, namespace=self)
+        self._argparser().parse_args(args, namespace=self)
         return self
 
 
@@ -175,7 +174,7 @@ class Engine:
 
         def wrapper(f):
             @MethodAttributes.wraps(f)
-            def target_wrapper(**kwargs):
+            def target_wrapper(*args, **kwargs):
                 truename = name or f.__name__
                 if factory or multi:
                     if multi:
@@ -186,7 +185,7 @@ class Engine:
                             memoize=memoize,
                         )
                     else:
-                        result = cast(Recipe, f(**kwargs))
+                        result = cast(Recipe, f(*args, **kwargs))
                         result.sync = sync
                         result.memoize = memoize
                         result.name = truename
@@ -194,8 +193,8 @@ class Engine:
 
                 return Lambda(
                     f,
-                    kwargs,
-                    pflags=Lambda.KWARGS & Lambda.RESULTS,
+                    [*args],
+                    {**kwargs},
                     name=truename,
                     sync=sync,
                     memoize=memoize,
@@ -259,6 +258,13 @@ class Engine:
             bus.subscribe(Events.SUCCESS, self._on_recipe_success)
 
             config = Config("Xeno Build Engine v5").parse_args(*argv)
+            if not config.targets:
+                default_target = self.default_target()
+                if default_target is not None:
+                    config.targets = [default_target]
+                else:
+                    raise ValueError("No target specified and no default target defined.")
+
             targets = await asyncio.gather(
                 *[
                     async_map(name, self.injector.require_async(name))
