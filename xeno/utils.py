@@ -39,6 +39,14 @@ async def async_wrap(f, *args, **kwargs):
 
 
 # --------------------------------------------------------------------
+async def async_vwrap(v):
+    """
+    Wraps a value in a coroutine for gathering.
+    """
+    return v
+
+
+# --------------------------------------------------------------------
 def bind_unbound_method(obj, method):
     return method.__get__(obj, obj.__class__)
 

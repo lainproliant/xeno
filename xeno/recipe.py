@@ -10,13 +10,13 @@
 import asyncio
 import shutil
 from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional
-from enum import Enum
 
-from xeno.events import EventBus, Event
+from xeno.events import Event, EventBus
 from xeno.shell import Shell
-from xeno.utils import async_wrap, is_iterable
+from xeno.utils import async_map, async_vwrap, async_wrap, is_iterable
 
 
 # --------------------------------------------------------------------
@@ -80,11 +80,45 @@ class Recipe:
         def has_recipes(self):
             return self._arg_offsets or self._kwarg_keys
 
+        async def gather_args(self):
+            """
+            Await resolution of recipes in args and update args with their results.
+            """
+            results = await asyncio.gather(
+                *[v() if isinstance(v, Recipe) else async_vwrap(v) for v in self._args]
+            )
+            self.scan_args(*results)
+
+        async def gather_kwargs(self):
+            """
+            Await resolution of recipes in kwargs and update with their results.
+            """
+            result_tuples = asyncio.gather(
+                *[
+                    async_map(k, v() if isinstance(v, Recipe) else async_vwrap(v))
+                    for k, v in self._kwargs.items()
+                ]
+            )
+            results = {k: v for k, v in result_tuples}
+            self.scan_kwargs(**results)
+
+        def gather_all(self):
+            """
+            Await resolution of recipes in args and kwargs and update both with
+            their results.
+            """
+
+            return asyncio.gather(self.gather_args(), self.gather_kwargs())
+
         def scan_args(self, *args):
+            self._args.clear()
+            self._arg_offsets.clear()
             for i, arg in enumerate(args):
                 self.scan(arg, offset=i)
 
         def scan_kwargs(self, **kwargs):
+            self._kwargs.clear()
+            self._kwarg_keys.clear()
             for k, arg in kwargs.items():
                 self.scan(arg, key=k)
 

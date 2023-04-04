@@ -15,9 +15,16 @@ import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Awaitable, Callable, Generator, Optional
+from enum import Enum
+from typing import Any, Callable, Generator, Optional
 
 from xeno.utils import async_wrap
+
+
+# --------------------------------------------------------------------
+class DispatchMode(Enum):
+    IMMEDIATE = 0
+    ASYNC = 1
 
 
 # --------------------------------------------------------------------
@@ -49,7 +56,7 @@ class EventBus:
 
         def __exit__(self, *_):
             EventBus._current_bus = None
-            self.bus.shutdown_flag.set()
+            self.bus.shutdown()
 
     @staticmethod
     def session() -> "EventBus._Session":
@@ -64,58 +71,114 @@ class EventBus:
     def __init__(self):
         self.queue: asyncio.Queue[Event] = asyncio.Queue()
         self.shutdown_flag = asyncio.Event()
-        self.broadcast_listeners: set[EventListener] = set()
-        self.subscriptions: defaultdict[str, set[EventListener]] = defaultdict(
-            lambda: set()
-        )
+        self.async_listeners: set[EventListener] = set()
+        self.sync_listeners: set[EventListener] = set()
+        self.async_subs: defaultdict[str, set[EventListener]] = defaultdict(set)
+        self.sync_subs: defaultdict[str, set[EventListener]] = defaultdict(set)
 
     def send(self, event: Event):
-        self.queue.put_nowait(event)
+        if self._has_async_listeners_for_event(event):
+            self.queue.put_nowait(event)
+        self._dispatch_sync(event)
 
     def shutdown(self):
-        self.shutdown_flag.set()
+        self.shutdown_flag = True
+        self.sync_listeners.clear()
+        self.sync_subs.clear()
+        self.async_listeners.clear()
+        self.async_subs.clear()
+        while not self.queue.empty():
+            self.queue.get_nowait()
 
-    def listen(self, listener: EventListener):
-        self.broadcast_listeners.add(listener)
+    def listen(
+        self,
+        listener: EventListener,
+        dispatch_mode=DispatchMode.IMMEDIATE,
+    ):
+        match dispatch_mode:
+            case DispatchMode.IMMEDIATE:
+                self.sync_listeners.add(listener)
+            case DispatchMode.ASYNC:
+                self.async_listeners.add(listener)
 
     def unlisten(self, listener: EventListener):
         try:
-            self.broadcast_listeners.remove(listener)
+            self.sync_listeners.remove(listener)
         except KeyError:
             pass
 
-    def subscribe(self, event: str, listener: EventListener):
-        self.subscriptions[event].add(listener)
+        try:
+            self.async_listeners.remove(listener)
+        except KeyError:
+            pass
+
+    def subscribe(
+        self, event: str, listener: EventListener, dispatch_mode=DispatchMode.IMMEDIATE
+    ):
+        match dispatch_mode:
+            case DispatchMode.IMMEDIATE:
+                self.sync_subs[event].add(listener)
+            case DispatchMode.ASYNC:
+                self.async_subs[event].add(listener)
 
     def unsubscribe(self, event: str, listener: EventListener):
-        subs = self.subscriptions[event]
+        subs = self.sync_subs[event]
         try:
             subs.remove(listener)
         except KeyError:
             pass
-
         if not subs:
-            del self.subscriptions[event]
+            del self.sync_subs[event]
+
+        subs = self.async_subs[event]
+        try:
+            subs.remove(listener)
+        except KeyError:
+            pass
+        if not subs:
+            del self.async_subs[event]
 
     async def run(self):
-        while not self.shutdown_flag.is_set():
-            event = self.queue.get_nowait()
-            if event is not None:
-                await self._dispatch(event)
+        while not self.shutdown_flag:
+            try:
+                event = self.queue.get_nowait()
+                await self._dispatch_async(event)
+
+            except asyncio.QueueEmpty:
+                pass
+
             await asyncio.sleep(0)
 
-    def _listeners_for_event(
+    def _has_async_listeners_for_event(self, event: Event) -> bool:
+        try:
+            next(self._async_listeners_for_event(event))
+            return True
+        except StopIteration:
+            return False
+
+    def _async_listeners_for_event(
         self, event: Event
     ) -> Generator[EventListener, None, None]:
-        yield from self.broadcast_listeners
-        if event.name in self.subscriptions:
-            yield from self.subscriptions[event.name]
+        yield from self.async_listeners
+        if event.name in self.async_subs:
+            yield from self.async_subs[event.name]
 
-    async def _dispatch(self, event: Event):
+    def _sync_listeners_for_event(
+        self, event: Event
+    ) -> Generator[EventListener, None, None]:
+        yield from self.sync_listeners
+        if event.name in self.sync_subs:
+            yield from self.sync_subs[event.name]
+
+    def _dispatch_sync(self, event: Event):
+        for listener in self._sync_listeners_for_event(event):
+            listener(event)
+
+    async def _dispatch_async(self, event: Event):
         await asyncio.gather(
             *(
                 async_wrap(listener, event)
-                for listener in self._listeners_for_event(event)
+                for listener in self._async_listeners_for_event(event)
             )
         )
 

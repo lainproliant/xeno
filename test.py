@@ -913,20 +913,33 @@ class XenoBuildTests(unittest.TestCase):
     def test_basic_build(self):
         engine = build.Engine()
 
-        @engine.recipe()
+        @engine.recipe
         def add(a, b):
             return a + b
 
-        @engine.target(factory=True)
+        @engine.recipe
+        def add_and_two(a, b):
+            return add(add(a, b), 2)
+
+        @engine.target
         def make_three():
             return add(1, 2)
 
-        @engine.target(default=True, factory=True)
+        @engine.target
         def make_five(make_three):
             return add(2, make_three)
 
+        @engine.target(default=True)
+        def make_seven(make_five):
+            return add_and_two(make_five, 0)
+
         result = engine.build()
-        self.assertEqual(result, [5])
+        self.assertEqual(result, [7])
+
+        print("----------")
+
+        result = engine.build("make_three", "make_five", "make_seven")
+        self.assertEqual(result, [3, 5, 7])
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":

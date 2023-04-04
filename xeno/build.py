@@ -8,9 +8,8 @@
 # --------------------------------------------------------------------
 
 import asyncio
-import sys
 from argparse import ArgumentParser
-from typing import Any, Optional, cast
+from typing import Any, Callable, Optional, cast, no_type_check
 
 # --------------------------------------------------------------------
 from xeno.async_injector import AsyncInjector
@@ -18,7 +17,7 @@ from xeno.attributes import MethodAttributes
 from xeno.decorators import named
 from xeno.events import EventBus
 from xeno.recipe import Events, Lambda, Recipe
-from xeno.utils import async_map
+from xeno.utils import async_map, is_iterable
 
 
 # --------------------------------------------------------------------
@@ -136,10 +135,9 @@ class Engine:
 
     def recipe(
         self,
-        name: Optional[str] = None,
+        name_or_f: Optional[str | Callable] = None,
         *,
         factory=False,
-        multi=False,
         sync=False,
         memoize=False,
     ):
@@ -151,9 +149,13 @@ class Engine:
         parameters are recipes or plain values.  Each recipe parameter has its
         result passed, whereas plain values are passed through unmodified.
 
-        If `factory` or `multi` are true, the function is a recipe factory
-        that returns one or more recipes and the values passed to it
-        are the recipe objects named.
+        Can be called with no parameters.  In this mode, the name is assumed
+        to be the name of the decorated function and all other parameters
+        are set to their defaults.
+
+        If `factory` is true, the function is a recipe factory that returns one
+        or more recipes and the values passed to it are the recipe objects
+        named.
 
         If `name` is provided, it is used as the name of the recipe.  Otherwise,
         the name of the recipe is inferred to be the name of the decorated
@@ -172,24 +174,28 @@ class Engine:
         evaluated once.
         """
 
+        name = None if callable(name_or_f) else name_or_f
+
         def wrapper(f):
             @MethodAttributes.wraps(f)
             def target_wrapper(*args, **kwargs):
                 truename = name or f.__name__
-                if factory or multi:
-                    if multi:
-                        return Recipe(
-                            [f(**kwargs)],
+                if factory:
+                    result = f(*args, **kwargs)
+                    if is_iterable(result):
+                        result = Recipe(
+                            [*result],
                             name=truename,
                             sync=sync,
                             memoize=memoize,
                         )
                     else:
-                        result = cast(Recipe, f(*args, **kwargs))
-                        result.sync = sync
-                        result.memoize = memoize
-                        result.name = truename
-                        return result
+                        result = cast(Recipe, result)
+
+                    result.sync = sync
+                    result.memoize = memoize
+                    result.name = truename
+                    return result
 
                 return Lambda(
                     f,
@@ -202,20 +208,24 @@ class Engine:
 
             return target_wrapper
 
-        return wrapper
+        if callable(name_or_f):
+            return no_type_check(wrapper(name_or_f))
+
+        return no_type_check(cast(Callable[[Callable], Callable], wrapper))
 
     def target(
         self,
-        name: Optional[str] = None,
+        name_or_f: Optional[str | Callable] = None,
         *,
-        factory=False,
-        multi=False,
         default=False,
         sync=False,
-        memoize=False,
     ):
         """
         Decorator for defining a target recipe for a build.
+
+        Can be called with no parameters.  In this mode, the name is assumed
+        to be the name of the decorated function and all other parameters
+        are set to their defaults.
 
         If `default` is True, the target will be the default target
         when no target is specified at build time.  This method will
@@ -225,10 +235,12 @@ class Engine:
         See `doc(xeno.build.Engine.recipe)` for info about the other params.
         """
 
+        name = None if callable(name_or_f) else name_or_f
+
         def wrapper(f):
-            target_wrapper = self.recipe(
-                name, factory=factory, multi=multi, sync=sync, memoize=memoize
-            )(f)
+            target_wrapper = cast(
+                Recipe, self.recipe(name, factory=True, sync=sync, memoize=True)(f)
+            )
             attrs = MethodAttributes.for_method(target_wrapper, True, True)
             assert attrs is not None
             attrs.put(self.Attributes.TARGET)
@@ -239,45 +251,69 @@ class Engine:
             self.provide(target_wrapper)
             return target_wrapper
 
+        if callable(name_or_f):
+            return wrapper(name_or_f)
+
         return wrapper
 
+    def _on_recipe_start(self, event):
+        print(f"LRS-DEBUG: start: {event.context.name}")
+
+    def _on_recipe_info(self, event):
+        print(f"LRS-DEBUG: start: {event.context.name}")
+
     def _on_recipe_clean(self, event):
-        print(f"LRS-DEBUG: clean: {event}")
+        print(f"LRS-DEBUG: clean: {event.context.name}")
 
     def _on_recipe_error(self, event):
-        print(f"LRS-DEBUG: error: {event}")
+        print(f"LRS-DEBUG: error: {event.context.name}")
 
     def _on_recipe_success(self, event):
-        print(f"LRS-DEBUG: success: {event}")
+        print(f"LRS-DEBUG: success: {event.context.name}")
 
     async def build_async(self, *argv) -> list[Any]:
-        with EventBus.session():
-            bus = EventBus.get()
-            bus.subscribe(Events.CLEAN, self._on_recipe_clean)
-            bus.subscribe(Events.ERROR, self._on_recipe_error)
-            bus.subscribe(Events.SUCCESS, self._on_recipe_success)
+        bus = EventBus.get()
+        bus.subscribe(Events.START, self._on_recipe_start)
+        bus.subscribe(Events.INFO, self._on_recipe_info)
+        bus.subscribe(Events.CLEAN, self._on_recipe_clean)
+        bus.subscribe(Events.ERROR, self._on_recipe_error)
+        bus.subscribe(Events.SUCCESS, self._on_recipe_success)
 
-            config = Config("Xeno Build Engine v5").parse_args(*argv)
-            if not config.targets:
-                default_target = self.default_target()
-                if default_target is not None:
-                    config.targets = [default_target]
-                else:
-                    raise ValueError("No target specified and no default target defined.")
+        config = Config("Xeno Build Engine v5").parse_args(*argv)
+        if not config.targets:
+            default_target = self.default_target()
+            if default_target is not None:
+                config.targets = [default_target]
+            else:
+                raise ValueError(
+                    "No target specified and no default target defined."
+                )
 
-            targets = await asyncio.gather(
-                *[
-                    async_map(name, self.injector.require_async(name))
-                    for name in config.targets
-                ]
-            )
+        targets = await asyncio.gather(
+            *[
+                async_map(name, self.injector.require_async(name))
+                for name in config.targets
+            ]
+        )
 
-            for name, target in targets:
-                assert isinstance(
-                    target, Recipe
-                ), f"Target `{name}` did not yield a recipe."
+        for name, target in targets:
+            assert isinstance(
+                target, Recipe
+            ), f"Target `{name}` did not yield a recipe."
 
-            return await asyncio.gather(*[v() for _, v in targets])
+        scan = Recipe.Scanner()
+        scan.scan_args(*[v for _, v in targets])
+        while scan.has_recipes():
+            await scan.gather_all()
+
+        bus.shutdown()
+        return scan.args(Recipe.PassMode.RESULTS)
+
+    async def _build_loop(self, bus, *argv):
+        result, _ = await asyncio.gather(self.build_async(*argv), bus.run())
+        return result
 
     def build(self, *argv):
-        return asyncio.run(self.build_async(*argv))
+        with EventBus.session():
+            bus = EventBus.get()
+            return asyncio.run(self._build_loop(bus, *argv))
