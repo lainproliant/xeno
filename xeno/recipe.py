@@ -87,6 +87,9 @@ class Recipe:
             results = await asyncio.gather(
                 *[v() if isinstance(v, Recipe) else async_vwrap(v) for v in self._args]
             )
+            for n in self._arg_offsets:
+                if isinstance(results[n], Recipe):
+                    results[n].configure(self._args[n])
             self.scan_args(*results)
 
         async def gather_kwargs(self):
@@ -100,6 +103,9 @@ class Recipe:
                 ]
             )
             results = {k: v for k, v in result_tuples}
+            for k in self._kwarg_keys:
+                if isinstance(results[k], Recipe):
+                    results[k].configure(self._kwargs[k])
             self.scan_kwargs(**results)
 
         def gather_all(self):
@@ -179,7 +185,7 @@ class Recipe:
         component_map: MappedComponents = {},
         *,
         setup: Optional["Recipe"] = None,
-        name="Nameless Recipe",
+        name="(nameless)",
         sync=False,
         memoize=False,
     ):
@@ -192,6 +198,10 @@ class Recipe:
         self.sync = sync
         self.memoize = memoize
         self.saved_result = None
+        self.parent_path: list[str] = []
+
+    def path(self) -> list[str]:
+        return [*self.parent_path, self.name]
 
     @staticmethod
     def scan(args: list[Any], kwargs: dict[str, Any]) -> Scanner:
@@ -216,7 +226,13 @@ class Recipe:
         return scanner
 
     def _contextualize(self, s: str) -> str:
-        return f"(for {self}) {s}"
+        return f"(for {self.path()}) {s}"
+
+    def _configure(self, parent: "Recipe"):
+        self.parent_path = parent.path()
+        self.memoize = parent.memoize
+        for r in self.components():
+            r._configure(self)
 
     def log(self, event_name: str, data: Any = None):
         bus = EventBus.get()
@@ -319,12 +335,18 @@ class Recipe:
             return self.component_results()
 
     async def make(self):
-        return True
+        return [r.result() for r in self.components()]
 
     def result(self):
         if self.saved_result is None:
             raise ValueError("Recipe result has not yet been recorded.")
         return self.saved_result
+
+    def result_or(self, other):
+        try:
+            return self.result()
+        except ValueError:
+            return other
 
     async def __call__(self):
         async with self.lock:
@@ -342,16 +364,17 @@ class Recipe:
 
             await self.make_components()
             result = await self.make()
-            scanner = Recipe.Scanner()
 
-            if scanner.scan(result):
-                self.log(
-                    Events.WARNING,
-                    "Recipe make() returned one or more other recipes, it should probably be a factory.",
-                )
-
-            if result is None:
-                raise self.error("Recipe make() didn't return a value.")
+            if is_iterable(result):
+                scanner = Recipe.Scanner()
+                scanner.scan_args(*result)
+                while scanner.has_recipes():
+                    await scanner.gather_all()
+                result = scanner.args(pass_mode=Recipe.PassMode.RESULTS)
+            else:
+                if isinstance(result, Recipe):
+                    result._configure(self)
+                    result = await result()
 
             self.saved_result = result
 
@@ -373,7 +396,7 @@ class FileRecipe(Recipe):
         component_map: MappedComponents = {},
         *,
         static=False,
-        user: Optional["str"] = None,
+        user: Optional[str] = None,
         **kwargs,
     ):
         assert not (

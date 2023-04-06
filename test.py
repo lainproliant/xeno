@@ -27,7 +27,9 @@ from xeno.pkg_config import PackageConfig
 
 
 import tracemalloc
+
 tracemalloc.start()
+
 
 # --------------------------------------------------------------------
 class CommonXenoTests(unittest.TestCase):
@@ -910,8 +912,18 @@ class XenoEnvironmentTests(unittest.TestCase):
 
 # --------------------------------------------------------------------
 class XenoBuildTests(unittest.TestCase):
+    def on_event(self, event):
+        print(
+            f"{event.name} ({event.context.memoize}): {event.context.result_or(None)} @ {event.context.path()}: {event.data}"
+        )
+
+    def bus_hook(self, bus):
+        print()
+        bus.listen(self.on_event)
+
     def test_basic_build(self):
         engine = build.Engine()
+        engine.add_bus_hook(self.bus_hook)
 
         @engine.recipe
         def add(a, b):
@@ -936,10 +948,52 @@ class XenoBuildTests(unittest.TestCase):
         result = engine.build()
         self.assertEqual(result, [7])
 
-        print("----------")
-
         result = engine.build("make_three", "make_five", "make_seven")
         self.assertEqual(result, [3, 5, 7])
+
+    def test_shell_recipe(self):
+        from xeno.build import engine, provide, target, recipe, build
+        from xeno.cookbook import sh
+
+        engine.add_bus_hook(self.bus_hook)
+
+        @recipe
+        async def slowly_make_number(n, sec=1):
+            await asyncio.sleep(sec)
+            return n
+
+        @provide
+        def file():
+            return "/proc/cpuinfo"
+
+        @target
+        def print_file(file):
+            return sh("cat {file}", file=file)
+
+        @target
+        def slow_number():
+            return slowly_make_number(99)
+
+        @target
+        def print_file_2(file):
+            return sh(["cat", file], interact=True)
+
+        @target
+        def two_slow_numbers():
+            return [slowly_make_number(5, 2), slowly_make_number(10, 2)]
+
+        result = build("print_file", "slow_number")
+        self.assertEqual(result, [0, 99])
+
+        result = build("print_file_2", "slow_number")
+        self.assertEqual(result, [0, 99])
+
+        start_time = datetime.now()
+        result = build("two_slow_numbers")
+        self.assertEqual(result, [[5, 10]])
+        end_time = datetime.now()
+        self.assertTrue(end_time - start_time < timedelta(seconds=3))
+
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":
