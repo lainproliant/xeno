@@ -34,13 +34,14 @@ class Config:
         TREE = "tree"
 
     class CleanupMode:
+        NONE = "none"
         SHALLOW = "shallow"
         RECURSIVE = "recursive"
 
     def __init__(self, name):
         self.name = name
         self.mode = self.Mode.BUILD
-        self.cleanup_mode = self.CleanupMode.RECURSIVE
+        self.cleanup_mode = self.CleanupMode.NONE
         self.debug = False
         self.force_color = False
         self.targets: list[str] = []
@@ -52,10 +53,18 @@ class Config:
         parser.add_argument(
             "--clean",
             "-c",
-            dest="mode",
+            dest="cleanup_mode",
             action="store_const",
-            const=self.Mode.CLEAN,
+            const=self.CleanupMode.RECURSIVE,
             help="Clean the specified targets and all of their inputs.",
+        )
+        parser.add_argument(
+            "--cut",
+            "-x",
+            dest="cleanup_mode",
+            action="store_const",
+            const=self.CleanupMode.SHALLOW,
+            help="Clean just the specified target leaving inputs intact.",
         )
         parser.add_argument(
             "--rebuild",
@@ -103,6 +112,8 @@ class Config:
 
     def parse_args(self, *args):
         self._argparser().parse_args(args, namespace=self)
+        if self.cleanup_mode != Config.CleanupMode.NONE:
+            self.mode = Config.Mode.CLEAN
         return self
 
 
@@ -190,10 +201,7 @@ class Engine:
 
         return wrapper
 
-    async def build_async(self, *argv) -> list[Any]:
-        bus = EventBus.get()
-
-        config = Config("Xeno Build Engine v5").parse_args(*argv)
+    async def _resolve_targets(self, config: Config) -> list[Recipe]:
         if not config.targets:
             default_target = self.default_target()
             if default_target is not None:
@@ -213,13 +221,48 @@ class Engine:
                 target, Recipe
             ), f"Target `{name}` did not yield a recipe."
 
+        return targets
+
+    async def _make_targets(self, config, targets):
         scan = Recipe.Scanner()
-        scan.scan_args(*[v for _, v in targets])
+        scan.scan_params(*[v for _, v in targets])
         while scan.has_recipes():
             await scan.gather_all()
 
-        bus.shutdown()
         return scan.args(Recipe.PassMode.RESULTS)
+
+    async def _clean_targets(self, config, targets):
+        match config.cleanup_mode:
+            case Config.CleanupMode.SHALLOW:
+                return await asyncio.gather(*[t.clean() for t in targets])
+            case Config.CleanupMode.RECURSIVE:
+                return await asyncio.gather(*[t.clean() for t in targets], *[t.clean_components() for t in targets])
+            case _:
+                raise ValueError("Config.cleanup_mode not specified.")
+
+    async def build_async(self, *argv) -> list[Any]:
+        bus = EventBus.get()
+
+        try:
+            config = Config("Xeno Build Engine v5").parse_args(*argv)
+            targets = await self._resolve_targets(config)
+
+            match config.mode:
+                case Config.Mode.BUILD:
+                    return await self._make_targets(config, targets)
+                case Config.Mode.CLEAN:
+                    return await self._clean_targets(config, targets)
+                case Config.Mode.LIST:
+                    return await self._list_targets(config, targets)
+                    pass
+                case Config.Mode.REBUILD:
+                    await self._clean_targets(config, targets)
+                    return await self._make_targets(config, targets)
+                case Config.Mode.TREE:
+                    return await self._list_target_tree(config, targets)
+
+        finally:
+            bus.shutdown()
 
     async def _build_loop(self, bus, *argv):
         result, _ = await asyncio.gather(self.build_async(*argv), bus.run())
@@ -235,13 +278,13 @@ class Engine:
 
 # --------------------------------------------------------------------
 class DefaultEngineHook:
-
     def __call__(self, bus: EventBus):
         pass
 
+
 # --------------------------------------------------------------------
 engine = Engine()
-#engine.add_bus_hook(default_bus_hook)
+# engine.add_bus_hook(default_bus_hook)
 provide = engine.provide
 recipe = engine.recipe
 target = engine.target

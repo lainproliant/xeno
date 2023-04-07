@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional
 
 from xeno.events import Event, EventBus
-from xeno.shell import Shell
+from xeno.shell import Shell, PathSpec
 from xeno.utils import async_map, async_vwrap, async_wrap, is_iterable
 
 
@@ -59,23 +59,34 @@ class Recipe:
         NORMAL = 0
         RESULTS = 1
 
+    class ParamType(Enum):
+        NORMAL = 0
+        RECIPE = 1
+        PATH = 2
+
     class Scanner:
         def __init__(self):
             self._args: list[Any] = []
             self._kwargs: dict[str, Any] = {}
             self._arg_offsets: list[int] = []
             self._kwarg_keys: list[str] = []
+            self._paths: list[Path] = []
 
-        def _scan_one(self, arg) -> tuple[Any, bool]:
+        def _scan_one(self, arg) -> tuple[Any, "Recipe.ParamType"]:
             if isinstance(arg, Recipe):
-                return arg, True
+                return arg, Recipe.ParamType.RECIPE
 
             if is_iterable(arg):
                 arg = [*arg]
                 if all(isinstance(x, Recipe) for x in arg):
-                    return arg, True
+                    return arg, Recipe.ParamType.RECIPE
+                if all(isinstance(x, Path) for x in arg):
+                    return arg, Recipe.ParamType.PATH
 
-            return arg, False
+            if isinstance(arg, Path):
+                return arg, Recipe.ParamType.PATH
+
+            return arg, Recipe.ParamType.NORMAL
 
         def has_recipes(self):
             return self._arg_offsets or self._kwarg_keys
@@ -90,7 +101,7 @@ class Recipe:
             for n in self._arg_offsets:
                 if isinstance(results[n], Recipe):
                     results[n].configure(self._args[n])
-            self.scan_args(*results)
+            self.scan_params(*results)
 
         async def gather_kwargs(self):
             """
@@ -106,7 +117,7 @@ class Recipe:
             for k in self._kwarg_keys:
                 if isinstance(results[k], Recipe):
                     results[k].configure(self._kwargs[k])
-            self.scan_kwargs(**results)
+            self.scan_params(**results)
 
         def gather_all(self):
             """
@@ -116,38 +127,41 @@ class Recipe:
 
             return asyncio.gather(self.gather_args(), self.gather_kwargs())
 
-        def scan_args(self, *args):
+        def scan_params(self, *args, **kwargs):
             self._args.clear()
             self._arg_offsets.clear()
+            self._kwargs.clear()
+            self._kwarg_keys.clear()
+            self._paths.clear()
+
             for i, arg in enumerate(args):
                 self.scan(arg, offset=i)
 
-        def scan_kwargs(self, **kwargs):
-            self._kwargs.clear()
-            self._kwarg_keys.clear()
             for k, arg in kwargs.items():
                 self.scan(arg, key=k)
 
-        def scan_args_kwargs(self, *args, **kwargs):
-            self.scan_args(*args)
-            self.scan_kwargs(**kwargs)
-
         def scan(
             self, arg, offset: Optional[int] = None, key: Optional[str] = None
-        ) -> bool:
-            arg, is_recipe = self._scan_one(arg)
+        ) -> "Recipe.ParamType":
+            arg, param_type = self._scan_one(arg)
+
+            if param_type == Recipe.ParamType.PATH:
+                if is_iterable(arg):
+                    self._paths.extend(arg)
+                else:
+                    self._paths.append(arg)
 
             if offset is not None:
                 self._args.append(arg)
-                if is_recipe:
+                if param_type == Recipe.ParamType.RECIPE:
                     self._arg_offsets.append(offset)
 
             elif key is not None:
                 self._kwargs[key] = arg
-                if is_recipe:
+                if param_type == Recipe.ParamType.RECIPE:
                     self._kwarg_keys.append(key)
 
-            return is_recipe
+            return param_type
 
         def args(self, pass_mode: "Recipe.PassMode") -> list[Any]:
             if pass_mode == Recipe.PassMode.NORMAL:
@@ -179,29 +193,8 @@ class Recipe:
         def component_map(self) -> MappedComponents:
             return {k: self._kwargs[k] for k in self._kwarg_keys}
 
-    def __init__(
-        self,
-        component_list: ListedComponents = [],
-        component_map: MappedComponents = {},
-        *,
-        setup: Optional["Recipe"] = None,
-        name="(nameless)",
-        sync=False,
-        memoize=False,
-    ):
-        self.component_list = component_list
-        self.component_map = component_map
-
-        self.lock = asyncio.Lock()
-        self.setup = setup
-        self.name = name
-        self.sync = sync
-        self.memoize = memoize
-        self.saved_result = None
-        self.parent_path: list[str] = []
-
-    def path(self) -> list[str]:
-        return [*self.parent_path, self.name]
+        def paths(self):
+            return self._paths
 
     @staticmethod
     def scan(args: list[Any], kwargs: dict[str, Any]) -> Scanner:
@@ -225,6 +218,34 @@ class Recipe:
 
         return scanner
 
+    def __init__(
+        self,
+        component_list: ListedComponents = [],
+        component_map: MappedComponents = {},
+        *,
+        as_user: Optional[str] = None,
+        memoize=False,
+        name="(nameless)",
+        setup: Optional["Recipe"] = None,
+        static_files: Iterable[PathSpec] = [],
+        sync=False,
+        target: Optional[PathSpec] = None,
+    ):
+        self.component_list = component_list
+        self.component_map = component_map
+
+        self.as_user = as_user
+        self.memoize = memoize
+        self.name = name
+        self.setup = setup
+        self.static_files = [Path(s) for s in static_files]
+        self.sync = sync
+        self.target = None if target is None else Path(target)
+
+        self.lock = asyncio.Lock()
+        self.saved_result = None
+        self.parent_path: list[str] = []
+
     def _contextualize(self, s: str) -> str:
         return f"(for {self.path()}) {s}"
 
@@ -233,6 +254,9 @@ class Recipe:
         self.memoize = parent.memoize
         for r in self.components():
             r._configure(self)
+
+    def path(self) -> list[str]:
+        return [*self.parent_path, self.name]
 
     def log(self, event_name: str, data: Any = None):
         bus = EventBus.get()
@@ -268,16 +292,30 @@ class Recipe:
         self.log(Events.ERROR, exc)
         return exc
 
-    def age(self, _: datetime) -> timedelta:
-        return timedelta.max
+    def age(self, ref: datetime) -> timedelta:
+        if self.target is None or not self.target.exists():
+            return timedelta.max
+        return ref - datetime.fromtimestamp(self.target.stat().st_mtime)
 
-    def component_age(self, ref: datetime) -> timedelta:
+    def static_files_age(self, ref: datetime) -> timedelta:
+        if not self.static_files:
+            return timedelta.max
+        else:
+            return min(
+                ref - datetime.fromtimestamp(f.stat().st_mtime)
+                for f in self.static_files
+            )
+
+    def components_age(self, ref: datetime) -> timedelta:
         if not self.has_components():
             return timedelta.max
         else:
-            return min(min(c.age(ref), c.component_age(ref)) for c in self.components())
+            return min(min(c.age(ref), c.components_age(ref)) for c in self.components())
 
-    def component_results(self) -> tuple[list[Any], dict[str, Any]]:
+    def inputs_age(self, ref: datetime) -> timedelta:
+        return min(self.inputs_age(ref), self.components_age(ref))
+
+    def components_results(self) -> tuple[list[Any], dict[str, Any]]:
         results = [c.result() for c in self.component_list]
         mapped_results = {}
 
@@ -290,16 +328,39 @@ class Recipe:
         return results, mapped_results
 
     def done(self) -> bool:
+        if self.target is not None:
+            return self.target.exists()
         return self.saved_result is not None
 
     def components_done(self) -> bool:
         return all(c.done() for c in self.components())
 
     def outdated(self, ref: datetime) -> bool:
-        return self.age(ref) <= self.component_age(ref)
+        return self.age(ref) <= self.inputs_age(ref)
 
     async def clean(self):
-        pass
+        if self.target is None or not self.target.exists():
+            return
+
+        try:
+            if self.as_user:
+                result = Shell().interact_as(
+                    self.as_user, ["rm", "-rf", str(self.target.absolute())]
+                )
+                if result != 0:
+                    raise RuntimeError(
+                        f"Failed to delete `f{self.target}` as `f{self.as_user}`."
+                    )
+            else:
+                if self.target.is_dir():
+                    shutil.rmtree(self.target)
+                else:
+                    self.target.unlink()
+
+        except Exception as e:
+            raise self.error("Failed to clean target.") from e
+
+        self.log(Events.CLEAN, self.target)
 
     async def clean_components(self):
         results = await asyncio.gather(
@@ -321,7 +382,7 @@ class Recipe:
                 except Exception as e:
                     raise self.error("Failed to make component.") from e
 
-            return self.component_results()
+            return self.components_results()
 
         else:
             results = await asyncio.gather(
@@ -332,7 +393,7 @@ class Recipe:
                 raise self.composite_error(
                     exceptions, "Failed to make one or more components."
                 )
-            return self.component_results()
+            return self.components_results()
 
     async def make(self):
         return [r.result() for r in self.components()]
@@ -367,7 +428,7 @@ class Recipe:
 
             if is_iterable(result):
                 scanner = Recipe.Scanner()
-                scanner.scan_args(*result)
+                scanner.scan_params(*result)
                 while scanner.has_recipes():
                     await scanner.gather_all()
                 result = scanner.args(pass_mode=Recipe.PassMode.RESULTS)
@@ -375,6 +436,16 @@ class Recipe:
                 if isinstance(result, Recipe):
                     result._configure(self)
                     result = await result()
+
+            if self.target is not None:
+                assert isinstance(
+                    result, str | Path
+                ), "Recipe declared a file target, but the result was not a string or Path object."
+
+                result = Path(result)
+                assert (
+                    result.resolve() == self.target.resolve()
+                ), f"Recipe declared a file target, but the result path differs: {result} != {self.target}."
 
             self.saved_result = result
 
@@ -385,61 +456,6 @@ class Recipe:
             self.log(Events.SUCCESS)
 
             return result
-
-
-# --------------------------------------------------------------------
-class FileRecipe(Recipe):
-    def __init__(
-        self,
-        target: str | Path,
-        component_list: ListedComponents = [],
-        component_map: MappedComponents = {},
-        *,
-        static=False,
-        user: Optional[str] = None,
-        **kwargs,
-    ):
-        assert not (
-            static and (component_list or component_map)
-        ), "Static files can't have components."
-        super().__init__(component_list, component_map, **kwargs)
-        self.target = Path(target)
-        self.static = static
-        self.user = user
-
-    def age(self, ref: datetime) -> timedelta:
-        if not self.target.exists():
-            return timedelta.max
-        return ref - datetime.fromtimestamp(self.target.stat().st_mtime)
-
-    def done(self):
-        return self.target.exists()
-
-    async def clean(self):
-        if self.static or not self.target.exists():
-            return
-        try:
-            if self.user:
-                result = Shell().interact_as(
-                    self.user, ["rm", "-rf", str(self.target.absolute())]
-                )
-                if result != 0:
-                    raise RuntimeError(
-                        f"Failed to delete `f{self.target}` as `f{self.user}`."
-                    )
-            else:
-                if self.target.is_dir():
-                    shutil.rmtree(self.target)
-                else:
-                    self.target.unlink()
-
-        except Exception as e:
-            raise self.error("Failed to clean.") from e
-
-        self.log(Events.CLEAN, self.target)
-
-    async def make(self):
-        return self.target
 
 
 # --------------------------------------------------------------------
@@ -457,7 +473,7 @@ class Lambda(Recipe):
 
         scanner = Recipe.scan(lambda_args, lambda_kwargs)
 
-        super().__init__(scanner.component_list(), scanner.component_map(), **kwargs)
+        super().__init__(scanner.component_list(), scanner.component_map(), static_files=scanner.paths(), **kwargs)
         self.f = f
         self.pass_mode = pass_mode
         self.scanner = scanner

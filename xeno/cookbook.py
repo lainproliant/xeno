@@ -124,7 +124,7 @@ class ShellRecipe(Recipe):
         interact=False,
         memoize=False,
         name: Optional[str] = None,
-        output: Optional[PathSpec] = None,
+        target: Optional[PathSpec] = None,
         quiet=False,
         result: Optional["ShellRecipe.ResultSpec"] = None,
         redacted: set[str] = set(),
@@ -138,7 +138,6 @@ class ShellRecipe(Recipe):
         self.cmd: list[str] | str = cmd if isinstance(cmd, str) else list(cmd)
         self.expected_code = code
         self.interact = interact
-        self.output = Path(output) if output is not None else None
         self.quiet = quiet
         self.redacted = redacted
         self.result_spec = result
@@ -146,9 +145,11 @@ class ShellRecipe(Recipe):
         super().__init__(
             [],
             self.scanner.component_map(),
-            name=name or self.program_name(),
-            sync=sync,
             memoize=memoize,
+            name=name or self.program_name(),
+            static_files=self.scanner.paths(),
+            sync=sync,
+            target=target,
         )
 
         self.return_code: Optional[int] = None
@@ -203,7 +204,7 @@ class ShellRecipe(Recipe):
             case ShellRecipe.Result.CODE:
                 return self.return_code
             case ShellRecipe.Result.FILE:
-                return self.output
+                return self.target
             case ShellRecipe.Result.STDOUT:
                 return self.stdout_lines
             case ShellRecipe.Result.STDERR:
@@ -211,7 +212,7 @@ class ShellRecipe(Recipe):
 
     def _compute_result(self):
         if self.result_spec is None:
-            if self.output is not None:
+            if self.target is not None:
                 result = ShellRecipe.Result.FILE
             else:
                 result = ShellRecipe.Result.CODE
