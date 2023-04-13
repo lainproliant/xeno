@@ -34,7 +34,7 @@ from .utils import async_map, async_wrap, resolve_alias
 # --------------------------------------------------------------------
 class AsyncInjector(AbstractInjector):
     """
-    A specialization of AsyncInjector, and the classic Injector
+    A specialization of AbstractInjector, and the classic Injector
     which supports async providers and uses an asyncio event loop
     during dependency resolution.
 

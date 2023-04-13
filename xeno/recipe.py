@@ -224,6 +224,7 @@ class Recipe:
         component_map: MappedComponents = {},
         *,
         as_user: Optional[str] = None,
+        keep=False,
         memoize=False,
         name="(nameless)",
         setup: Optional["Recipe"] = None,
@@ -235,6 +236,7 @@ class Recipe:
         self.component_map = component_map
 
         self.as_user = as_user
+        self.keep = keep
         self.memoize = memoize
         self.name = name
         self.setup = setup
@@ -310,7 +312,9 @@ class Recipe:
         if not self.has_components():
             return timedelta.max
         else:
-            return min(min(c.age(ref), c.components_age(ref)) for c in self.components())
+            return min(
+                min(c.age(ref), c.components_age(ref)) for c in self.components()
+            )
 
     def inputs_age(self, ref: datetime) -> timedelta:
         return min(self.inputs_age(ref), self.components_age(ref))
@@ -339,7 +343,7 @@ class Recipe:
         return self.age(ref) <= self.inputs_age(ref)
 
     async def clean(self):
-        if self.target is None or not self.target.exists():
+        if self.target is None or not self.target.exists() or self.keep:
             return
 
         try:
@@ -473,7 +477,12 @@ class Lambda(Recipe):
 
         scanner = Recipe.scan(lambda_args, lambda_kwargs)
 
-        super().__init__(scanner.component_list(), scanner.component_map(), static_files=scanner.paths(), **kwargs)
+        super().__init__(
+            scanner.component_list(),
+            scanner.component_map(),
+            static_files=scanner.paths(),
+            **kwargs,
+        )
         self.f = f
         self.pass_mode = pass_mode
         self.scanner = scanner

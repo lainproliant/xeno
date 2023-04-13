@@ -161,6 +161,9 @@ class Engine:
         name_or_f: Optional[str | Callable] = None,
         *,
         default=False,
+        factory=True,
+        keep=False,
+        memoize=True,
         sync=False,
     ):
         """
@@ -184,7 +187,10 @@ class Engine:
 
         def wrapper(f):
             target_wrapper = cast(
-                Recipe, base_recipe(name, factory=True, sync=sync, memoize=True)(f)
+                Recipe,
+                base_recipe(
+                    name, factory=factory, keep=keep, sync=sync, memoize=memoize
+                )(f),
             )
             attrs = MethodAttributes.for_method(target_wrapper, True, True)
             assert attrs is not None
@@ -232,11 +238,15 @@ class Engine:
         return scan.args(Recipe.PassMode.RESULTS)
 
     async def _clean_targets(self, config, targets):
+        print(f'LRS-DEBUG: targets={repr(targets)}')
         match config.cleanup_mode:
             case Config.CleanupMode.SHALLOW:
-                return await asyncio.gather(*[t.clean() for t in targets])
+                return await asyncio.gather(*[t.clean() for _, t in targets])
             case Config.CleanupMode.RECURSIVE:
-                return await asyncio.gather(*[t.clean() for t in targets], *[t.clean_components() for t in targets])
+                return await asyncio.gather(
+                    *[t.clean() for _, t in targets],
+                    *[t.clean_components() for _, t in targets],
+                )
             case _:
                 raise ValueError("Config.cleanup_mode not specified.")
 

@@ -23,6 +23,7 @@ def recipe(
     name_or_f: Optional[str | Callable] = None,
     *,
     factory=False,
+    keep=False,
     sync=False,
     memoize=False,
 ):
@@ -75,6 +76,7 @@ def recipe(
                     result = Recipe(
                         [*result],
                         name=truename,
+                        keep=keep,
                         sync=sync,
                         memoize=memoize,
                     )
@@ -82,6 +84,7 @@ def recipe(
                     result = cast(Recipe, result)
 
                 result.sync = sync
+                result.keep = keep
                 result.memoize = memoize
                 result.name = truename
                 return result
@@ -92,6 +95,7 @@ def recipe(
                 {**kwargs},
                 name=truename,
                 sync=sync,
+                keep=keep,
                 memoize=memoize,
             )
 
@@ -133,6 +137,9 @@ class ShellRecipe(Recipe):
     ):
         self.env = Environment.context() if env is None else Environment.context() + env
         self.shell = Shell(self.env, cwd)
+
+        if target is not None:
+            kwargs = dict(target=target, **kwargs)
 
         self.as_user = as_user
         self.cmd: list[str] | str = cmd if isinstance(cmd, str) else list(cmd)
@@ -188,7 +195,7 @@ class ShellRecipe(Recipe):
 
         assert (
             self.return_code == self.expected_code
-        ), "Unexpected return code.  (expected {self.expected_code}, got {self.return_code})"
+        ), f"Unexpected return code.  (expected {self.expected_code}, got {self.return_code})"
 
         return self._compute_result()
 

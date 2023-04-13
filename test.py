@@ -1,6 +1,11 @@
 import asyncio
+import os
+import shutil
+import tracemalloc
 import unittest
+import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from xeno import (
     AsyncInjector,
@@ -12,9 +17,9 @@ from xeno import (
     MissingDependencyError,
     MissingResourceError,
     SyncInjector,
-    build,
     Tags,
     alias,
+    build,
     const,
     inject,
     named,
@@ -23,10 +28,9 @@ from xeno import (
     singleton,
     using,
 )
+from xeno.build import Engine
+from xeno.cookbook import sh
 from xeno.pkg_config import PackageConfig
-
-
-import tracemalloc
 
 tracemalloc.start()
 
@@ -951,11 +955,13 @@ class XenoBuildTests(unittest.TestCase):
         result = engine.build("make_three", "make_five", "make_seven")
         self.assertEqual(result, [3, 5, 7])
 
-    def test_shell_recipe(self):
-        from xeno.build import engine, provide, target, recipe, build
+    def test_shell_recipe_and_async_timing(self):
+        from xeno.build import build, engine, provide, recipe, target
         from xeno.cookbook import sh
 
         engine.add_bus_hook(self.bus_hook)
+
+        sh.env = dict(CAT="cat")
 
         @recipe
         async def slowly_make_number(n, sec=1):
@@ -968,7 +974,7 @@ class XenoBuildTests(unittest.TestCase):
 
         @target
         def print_file(file):
-            return sh("cat {file}", file=file)
+            return sh("{CAT} {file}", file=file)
 
         @target
         def slow_number():
@@ -976,7 +982,7 @@ class XenoBuildTests(unittest.TestCase):
 
         @target
         def print_file_2(file):
-            return sh(["cat", file], interact=True)
+            return sh(["{CAT}", file], interact=True)
 
         @target
         def two_slow_numbers():
@@ -994,6 +1000,40 @@ class XenoBuildTests(unittest.TestCase):
         end_time = datetime.now()
         self.assertTrue(end_time - start_time < timedelta(seconds=3))
 
+    def test_file_target_recipes(self):
+        engine = Engine()
+        engine.add_bus_hook(self.bus_hook)
+
+        uid = str(uuid.uuid4())
+
+        try:
+
+            @engine.provide
+            def unique_name():
+                return str(uid)
+
+            @engine.recipe
+            def hello_file(output_dir, file):
+                return sh("echo 'Hello, world!' > {target}", target=output_dir / file)
+
+            @engine.target(keep=True)
+            def output_dir(unique_name):
+                return sh("mkdir {target}", target=Path("/tmp") / unique_name)
+
+            @engine.target(default=True)
+            def make_hello_file(output_dir):
+                return hello_file(output_dir, "hello.txt")
+
+            result = engine.build()
+            self.assertEqual(str(result[0]), f'/tmp/{uid}/hello.txt')
+            self.assertTrue(result[0].exists())
+
+            engine.build("-c")
+            self.assertFalse(result[0].exists())
+
+        finally:
+            if os.path.exists(f"/tmp/{uid}"):
+                shutil.rmtree(f"/tmp/{uid}")
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":
