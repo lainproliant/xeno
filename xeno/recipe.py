@@ -8,6 +8,7 @@
 # --------------------------------------------------------------------
 
 import asyncio
+import inspect
 import shutil
 from datetime import datetime, timedelta
 from enum import Enum
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional
 
 from xeno.events import Event, EventBus
-from xeno.shell import Shell, PathSpec
+from xeno.shell import PathSpec, Shell
 from xeno.utils import async_map, async_vwrap, async_wrap, is_iterable
 
 
@@ -55,9 +56,12 @@ MappedComponents = dict[str, "Recipe" | Iterable["Recipe"]]
 
 # --------------------------------------------------------------------
 class Recipe:
+    DEFAULT_TARGET_PARAM = 'out'
+
     class PassMode(Enum):
         NORMAL = 0
         RESULTS = 1
+        TARGETS = 2
 
     class ParamType(Enum):
         NORMAL = 0
@@ -164,28 +168,53 @@ class Recipe:
             return param_type
 
         def args(self, pass_mode: "Recipe.PassMode") -> list[Any]:
-            if pass_mode == Recipe.PassMode.NORMAL:
-                return self._args
-            results = [*self._args]
-            for offset in self._arg_offsets:
-                value = results[offset]
-                if is_iterable(value):
-                    results[offset] = [r.result() for r in value]
-                else:
-                    results[offset] = value.result()
-            return results
+            match pass_mode:
+                case Recipe.PassMode.NORMAL:
+                    return self._args
+                case Recipe.PassMode.RESULTS:
+                    results = [*self._args]
+                    for offset in self._arg_offsets:
+                        value = results[offset]
+                        if is_iterable(value):
+                            results[offset] = [r.result() for r in value]
+                        else:
+                            results[offset] = value.result()
+                    return results
+                case Recipe.PassMode.TARGETS:
+                    results = [*self._args]
+                    for offset in self._arg_offsets:
+                        value = results[offset]
+                        if is_iterable(value):
+                            results[offset] = [r.target_or(r) for r in value]
+                        else:
+                            results[offset] = value.target_or(value)
+                    return results
 
         def kwargs(self, pass_mode: "Recipe.PassMode") -> dict[str, Any]:
-            if pass_mode == Recipe.PassMode.NORMAL:
-                return self._kwargs
-            results = {**self._kwargs}
-            for key in self._kwarg_keys:
-                value = results[key]
-                if is_iterable(value):
-                    results[key] = [r.result() for r in value]
-                else:
-                    results[key] = value.result()
-            return results
+            match pass_mode:
+                case Recipe.PassMode.NORMAL:
+                    return self._kwargs
+                case Recipe.PassMode.RESULTS:
+                    results = {**self._kwargs}
+                    for key in self._kwarg_keys:
+                        value = results[key]
+                        if is_iterable(value):
+                            results[key] = [r.result() for r in value]
+                        else:
+                            results[key] = value.result()
+                    return results
+                case Recipe.PassMode.TARGETS:
+                    results = {**self._kwargs}
+                    for key in self._kwarg_keys:
+                        value = results[key]
+                        if is_iterable(value):
+                            results[key] = [r.target_or(r) for r in value]
+                        else:
+                            results[key] = value.target_or(value)
+                    return results
+
+        def paths(self):
+            return self._paths
 
         def component_list(self) -> ListedComponents:
             return [self._args[x] for x in self._arg_offsets]
@@ -193,11 +222,16 @@ class Recipe:
         def component_map(self) -> MappedComponents:
             return {k: self._kwargs[k] for k in self._kwarg_keys}
 
-        def paths(self):
-            return self._paths
+        def components(self) -> Generator["Recipe", None, None]:
+            yield from self.component_list()
+            for c in self.component_map().values():
+                if isinstance(c, Recipe):
+                    yield c
+                else:
+                    yield from c
 
     @staticmethod
-    def scan(args: list[Any], kwargs: dict[str, Any]) -> Scanner:
+    def scan(args: Iterable[Any], kwargs: dict[str, Any]) -> Scanner:
         """
         Scan the given arguments for recipes, and return a tuple of offsets
         and keys where the recipes or recipe lists were found.
@@ -364,6 +398,7 @@ class Recipe:
         except Exception as e:
             raise self.error("Failed to clean target.") from e
 
+        self.saved_result = None
         self.log(Events.CLEAN, self.target)
 
     async def clean_components(self):
@@ -412,6 +447,11 @@ class Recipe:
             return self.result()
         except ValueError:
             return other
+
+    def target_or(self, other):
+        if self.target is None:
+            return other
+        return self.target
 
     async def __call__(self):
         async with self.lock:
@@ -470,17 +510,22 @@ class Lambda(Recipe):
         lambda_args: list[Any],
         lambda_kwargs: dict[str, Any],
         pass_mode=Recipe.PassMode.RESULTS,
+        target_param=Recipe.DEFAULT_TARGET_PARAM,
         **kwargs,
     ):
         if "name" not in kwargs:
             kwargs = {**kwargs, "name": f.__name__}
 
         scanner = Recipe.scan(lambda_args, lambda_kwargs)
+        sig = inspect.signature(f)
+        bound_args = sig.bind(*lambda_args, **lambda_kwargs)
+        target = bound_args.arguments.get(target_param, None)
 
         super().__init__(
             scanner.component_list(),
             scanner.component_map(),
             static_files=scanner.paths(),
+            target=target,
             **kwargs,
         )
         self.f = f

@@ -1013,22 +1013,36 @@ class XenoBuildTests(unittest.TestCase):
                 return str(uid)
 
             @engine.recipe
-            def hello_file(output_dir, file):
-                return sh("echo 'Hello, world!' > {target}", target=output_dir / file)
+            def hello_file(out):
+                return sh(
+                    "echo 'Hello, world!' > {out}",
+                    out=out,
+                )
 
             @engine.target(keep=True)
             def output_dir(unique_name):
-                return sh("mkdir {target}", target=Path("/tmp") / unique_name)
+                return sh("mkdir {out}", out=Path("/tmp") / unique_name)
 
             @engine.target(default=True)
             def make_hello_file(output_dir):
-                return hello_file(output_dir, "hello.txt")
+                return hello_file(output_dir / "hello.txt")
 
             result = engine.build()
-            self.assertEqual(str(result[0]), f'/tmp/{uid}/hello.txt')
+            self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
             self.assertTrue(result[0].exists())
 
             engine.build("-c")
+            self.assertFalse(result[0].exists())
+
+            result = engine.build()
+            self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
+            self.assertTrue(result[0].exists())
+
+            result = engine.build('-R')
+            self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
+            self.assertTrue(result[0].exists())
+
+            engine.build("-x")
             self.assertFalse(result[0].exists())
 
         finally:

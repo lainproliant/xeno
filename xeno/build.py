@@ -114,6 +114,8 @@ class Config:
         self._argparser().parse_args(args, namespace=self)
         if self.cleanup_mode != Config.CleanupMode.NONE:
             self.mode = Config.Mode.CLEAN
+        if self.mode == Config.Mode.REBUILD:
+            self.cleanup_mode = Config.CleanupMode.RECURSIVE
         return self
 
 
@@ -238,7 +240,6 @@ class Engine:
         return scan.args(Recipe.PassMode.RESULTS)
 
     async def _clean_targets(self, config, targets):
-        print(f'LRS-DEBUG: targets={repr(targets)}')
         match config.cleanup_mode:
             case Config.CleanupMode.SHALLOW:
                 return await asyncio.gather(*[t.clean() for _, t in targets])

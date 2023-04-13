@@ -9,7 +9,6 @@
 import inspect
 import shlex
 from enum import Enum
-from pathlib import Path
 from typing import Callable, Iterable, Optional, Union, cast, no_type_check
 
 from xeno.attributes import MethodAttributes
@@ -71,8 +70,20 @@ def recipe(
                     raise ValueError(
                         "Recipe factories should not be coroutines.  You should define asynchronous behavior in recipes and return these from recipe factories and target definitions instead."
                     )
-                result = f(*args, **kwargs)
+
+                scanner = Recipe.scan(args, kwargs)
+                target_components = [
+                    c for c in scanner.components() if c.target is not None
+                ]
+                result = f(
+                    *scanner.args(Recipe.PassMode.TARGETS),
+                    **scanner.kwargs(Recipe.PassMode.TARGETS))
+
                 if is_iterable(result):
+                    recipes = [*result]
+                    for recipe in recipes:
+                        recipe.component_list.extend(target_components)
+
                     result = Recipe(
                         [*result],
                         name=truename,
@@ -82,6 +93,7 @@ def recipe(
                     )
                 else:
                     result = cast(Recipe, result)
+                    result.component_list.extend(target_components)
 
                 result.sync = sync
                 result.keep = keep
@@ -128,7 +140,6 @@ class ShellRecipe(Recipe):
         interact=False,
         memoize=False,
         name: Optional[str] = None,
-        target: Optional[PathSpec] = None,
         quiet=False,
         result: Optional["ShellRecipe.ResultSpec"] = None,
         redacted: set[str] = set(),
@@ -138,8 +149,10 @@ class ShellRecipe(Recipe):
         self.env = Environment.context() if env is None else Environment.context() + env
         self.shell = Shell(self.env, cwd)
 
-        if target is not None:
-            kwargs = dict(target=target, **kwargs)
+        target = None
+
+        if Recipe.DEFAULT_TARGET_PARAM in kwargs:
+            target = kwargs[Recipe.DEFAULT_TARGET_PARAM]
 
         self.as_user = as_user
         self.cmd: list[str] | str = cmd if isinstance(cmd, str) else list(cmd)
