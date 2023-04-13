@@ -271,6 +271,8 @@ class Engine:
                     return await self._make_targets(config, targets)
                 case Config.Mode.TREE:
                     return await self._list_target_tree(config, targets)
+                case _:
+                    raise RuntimeError("Unknown mode encountered.")
 
         finally:
             bus.shutdown()

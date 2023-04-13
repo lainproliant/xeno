@@ -1,6 +1,7 @@
 import asyncio
 import os
 import shutil
+import sys
 import tracemalloc
 import unittest
 import uuid
@@ -31,6 +32,7 @@ from xeno import (
 from xeno.build import Engine
 from xeno.cookbook import sh
 from xeno.pkg_config import PackageConfig
+from xeno.testing import OutputCapture
 
 tracemalloc.start()
 
@@ -1038,7 +1040,7 @@ class XenoBuildTests(unittest.TestCase):
             self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
             self.assertTrue(result[0].exists())
 
-            result = engine.build('-R')
+            result = engine.build("-R")
             self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
             self.assertTrue(result[0].exists())
 
@@ -1048,6 +1050,19 @@ class XenoBuildTests(unittest.TestCase):
         finally:
             if os.path.exists(f"/tmp/{uid}"):
                 shutil.rmtree(f"/tmp/{uid}")
+
+
+# --------------------------------------------------------------------
+class XenoTestingUtilsTests(unittest.TestCase):
+    def test_output_capture(self):
+        original_stdout = sys.stdout
+
+        with OutputCapture(stdout=True) as capture:
+            self.assertIs(sys.stdout, capture.stdout)
+            print("Hello!")
+            self.assertEqual(capture.stdout.getvalue(), "Hello!\n")
+
+        self.assertIs(sys.stdout, original_stdout)
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":
