@@ -25,10 +25,16 @@ class Events:
     CLEAN = "clean"
     DEBUG = "debug"
     ERROR = "error"
-    WARNING = "warning"
+    FAIL = "fail"
     INFO = "info"
     START = "start"
     SUCCESS = "success"
+    WARNING = "warning"
+
+
+# --------------------------------------------------------------------
+class BuildError(Exception):
+    pass
 
 
 # --------------------------------------------------------------------
@@ -52,11 +58,17 @@ class CompositeError(Exception):
 # --------------------------------------------------------------------
 ListedComponents = Iterable["Recipe"]
 MappedComponents = dict[str, "Recipe" | Iterable["Recipe"]]
+FormatF = Callable[["Recipe"], str]
 
 
 # --------------------------------------------------------------------
 class Recipe:
-    DEFAULT_TARGET_PARAM = 'out'
+    DEFAULT_TARGET_PARAM = "out"
+    SIGIL_TARGET_SEPARATOR = "→ "
+    START_SYMBOL = "⚙"
+    OK_SYMBOL = "✓"
+    FAIL_SYMBOL = "✗"
+    WARNING_SYMBOL = "⚠"
 
     class PassMode(Enum):
         NORMAL = 0
@@ -252,16 +264,27 @@ class Recipe:
 
         return scanner
 
+    @staticmethod
+    def sigil_format(recipe: "Recipe") -> str:
+        if recipe.target is not None:
+            return f"{recipe.name}{recipe.SIGIL_TARGET_SEPARATOR}{recipe.target.name}"
+        return recipe.name
+
     def __init__(
         self,
         component_list: ListedComponents = [],
         component_map: MappedComponents = {},
         *,
         as_user: Optional[str] = None,
+        clean_f: Optional[FormatF] = None,
+        fail_f: Optional[FormatF] = None,
         keep=False,
         memoize=False,
         name="(nameless)",
+        ok_f: Optional[FormatF] = None,
         setup: Optional["Recipe"] = None,
+        sigil: Optional[FormatF] = None,
+        start_f: Optional[FormatF] = None,
         static_files: Iterable[PathSpec] = [],
         sync=False,
         target: Optional[PathSpec] = None,
@@ -270,11 +293,18 @@ class Recipe:
         self.component_map = component_map
 
         self.as_user = as_user
+        self.clean_f: FormatF = clean_f or (
+            lambda r: f'cleaned {r.target.name if r.target else ""}'
+        )
+        self.fail_f: FormatF = fail_f or (lambda _: f"{Recipe.FAIL_SYMBOL} fail")
         self.keep = keep
         self.memoize = memoize
         self.name = name
         self.setup = setup
-        self.static_files = [Path(s) for s in static_files]
+        self.sigil: FormatF = sigil or Recipe.sigil_format
+        self.start_f: FormatF = start_f or (lambda _: f"{Recipe.START_SYMBOL} start")
+        self.ok_f: FormatF = ok_f or (lambda _: f"{Recipe.OK_SYMBOL} ok")
+        self.static_files = [Path(s) for s in static_files if s != target]
         self.sync = sync
         self.target = None if target is None else Path(target)
 
@@ -283,7 +313,7 @@ class Recipe:
         self.parent_path: list[str] = []
 
     def _contextualize(self, s: str) -> str:
-        return f"[self.sigil()] {s}"
+        return f"[{self.sigil(self)}] {s}"
 
     def _configure(self, parent: "Recipe"):
         self.parent_path = parent.path()
@@ -293,17 +323,6 @@ class Recipe:
 
     def path(self) -> list[str]:
         return [*self.parent_path, self.name]
-
-    def sigil(self):
-        if self.target:
-            return f"{self.name} > {self.target.name}"
-        return self.name
-
-    def start_message(self):
-        return "start"
-
-    def success_message(self):
-        return "ok"
 
     def log(self, event_name: str, data: Any = None):
         bus = EventBus.get()
@@ -340,9 +359,9 @@ class Recipe:
         return exc
 
     def age(self, ref: datetime) -> timedelta:
-        if self.target is None or not self.target.exists():
-            return timedelta.max
-        return ref - datetime.fromtimestamp(self.target.stat().st_mtime)
+        if self.target is not None and self.target.exists():
+            return ref - datetime.fromtimestamp(self.target.stat().st_mtime)
+        return timedelta.min
 
     def static_files_age(self, ref: datetime) -> timedelta:
         if not self.static_files:
@@ -358,11 +377,11 @@ class Recipe:
             return timedelta.max
         else:
             return min(
-                min(c.age(ref), c.components_age(ref)) for c in self.components()
+                max(c.age(ref), c.components_age(ref)) for c in self.components()
             )
 
     def inputs_age(self, ref: datetime) -> timedelta:
-        return min(self.inputs_age(ref), self.components_age(ref))
+        return min(self.static_files_age(ref), self.components_age(ref))
 
     def components_results(self) -> tuple[list[Any], dict[str, Any]]:
         results = [c.result() for c in self.component_list]
@@ -385,7 +404,7 @@ class Recipe:
         return all(c.done() for c in self.components())
 
     def outdated(self, ref: datetime) -> bool:
-        return self.age(ref) <= self.inputs_age(ref)
+        return self.age(ref) > self.inputs_age(ref)
 
     async def clean(self):
         if self.target is None or not self.target.exists() or self.keep:
@@ -464,53 +483,56 @@ class Recipe:
             return other
         return self.target
 
+    async def _resolve(self):
+        await self.make_components()
+        result = await self.make()
+
+        if is_iterable(result):
+            scanner = Recipe.Scanner()
+            scanner.scan_params(*result)
+            while scanner.has_recipes():
+                await scanner.gather_all()
+            result = scanner.args(pass_mode=Recipe.PassMode.RESULTS)
+        else:
+            if isinstance(result, Recipe):
+                result._configure(self)
+                result = await result()
+
+        if self.target is not None:
+            assert isinstance(
+                result, str | Path
+            ), "Recipe declared a file target, but the result was not a string or Path object."
+
+            result = Path(result)
+            assert (
+                result.resolve() == self.target.resolve()
+            ), f"Recipe declared a file target, but the result path differs: {result} != {self.target}."
+
+        self.saved_result = result
+
+        if not self.done():
+            self.saved_result = None
+            raise self.error("Recipe make() didn't complete successfully.")
+
+        return result
+
     async def __call__(self):
         async with self.lock:
-            if self.memoize and self.saved_result is not None:
+            if self.memoize and self.done() and not self.outdated(datetime.now()):
                 return self.saved_result
 
-            if self.setup is not None:
-                try:
+            try:
+                if self.setup is not None:
                     await self.setup()
 
-                except Exception as e:
-                    raise self.error("Setup method failed.") from e
+                self.log(Events.START)
+                result = await self._resolve()
+                self.log(Events.SUCCESS)
+                return result
 
-            self.log(Events.START)
-
-            await self.make_components()
-            result = await self.make()
-
-            if is_iterable(result):
-                scanner = Recipe.Scanner()
-                scanner.scan_params(*result)
-                while scanner.has_recipes():
-                    await scanner.gather_all()
-                result = scanner.args(pass_mode=Recipe.PassMode.RESULTS)
-            else:
-                if isinstance(result, Recipe):
-                    result._configure(self)
-                    result = await result()
-
-            if self.target is not None:
-                assert isinstance(
-                    result, str | Path
-                ), "Recipe declared a file target, but the result was not a string or Path object."
-
-                result = Path(result)
-                assert (
-                    result.resolve() == self.target.resolve()
-                ), f"Recipe declared a file target, but the result path differs: {result} != {self.target}."
-
-            self.saved_result = result
-
-            if not self.done():
-                self.saved_result = None
-                raise self.error("Recipe make() didn't complete successfully.")
-
-            self.log(Events.SUCCESS)
-
-            return result
+            except Exception as e:
+                self.log(Events.FAIL, e)
+                raise BuildError() from e
 
 
 # --------------------------------------------------------------------

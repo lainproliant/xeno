@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Callable, Iterable, Optional, Union, cast, no_type_check
 
 from xeno.attributes import MethodAttributes
-from xeno.recipe import Events, Lambda, Recipe
+from xeno.recipe import Events, Lambda, Recipe, FormatF
 from xeno.shell import Environment, PathSpec, Shell
 from xeno.utils import is_iterable
 
@@ -21,10 +21,15 @@ from xeno.utils import is_iterable
 def recipe(
     name_or_f: Optional[str | Callable] = None,
     *,
+    clean_f: Optional[FormatF] = None,
     factory=False,
+    fail_f: Optional[FormatF] = None,
     keep=False,
-    sync=False,
     memoize=False,
+    ok_f: Optional[FormatF] = None,
+    sigil: Optional[FormatF] = None,
+    start_f: Optional[FormatF] = None,
+    sync=False,
 ):
     """
     Decorator for a function that defines a recipe template.
@@ -87,29 +92,43 @@ def recipe(
 
                     result = Recipe(
                         [*result],
-                        name=truename,
+                        clean_f=clean_f,
+                        fail_f=fail_f,
                         keep=keep,
-                        sync=sync,
                         memoize=memoize,
+                        name=truename,
+                        ok_f=ok_f,
+                        sigil=sigil,
+                        start_f=start_f,
+                        sync=sync,
                     )
                 else:
                     result = cast(Recipe, result)
                     result.component_list.extend(target_components)
 
-                result.sync = sync
-                result.keep = keep
-                result.memoize = memoize
-                result.name = truename
+                    result.clean_f = clean_f or result.clean_f
+                    result.fail_f = fail_f or result.fail_f
+                    result.keep = keep
+                    result.memoize = memoize
+                    result.name = truename
+                    result.ok_f = ok_f or result.ok_f
+                    result.sigil = sigil or result.sigil
+                    result.start_f = start_f or result.start_f
+                    result.sync = sync
+
                 return result
 
             return Lambda(
                 f,
                 [*args],
                 {**kwargs},
-                name=truename,
-                sync=sync,
                 keep=keep,
                 memoize=memoize,
+                name=truename,
+                ok_f=ok_f,
+                sigil=sigil,
+                start_f=start_f,
+                sync=sync,
             )
 
         return target_wrapper
@@ -129,6 +148,15 @@ class ShellRecipe(Recipe):
         FILE = 3
 
     ResultSpec = Iterable[Result] | Result
+
+    @staticmethod
+    def sigil_format(recipe: Recipe) -> str:
+        assert isinstance(recipe, ShellRecipe)
+        recipe = cast(ShellRecipe, recipe)
+        if recipe.target is not None:
+            return f'{recipe.program_name()}{recipe.SIGIL_TARGET_SEPARATOR}{recipe.target.name}'
+        else:
+            return recipe.program_name()
 
     def __init__(
         self,
@@ -168,6 +196,7 @@ class ShellRecipe(Recipe):
             self.scanner.component_map(),
             memoize=memoize,
             name=name or self.program_name(),
+            sigil=ShellRecipe.sigil_format,
             static_files=self.scanner.paths(),
             sync=sync,
             target=target,
@@ -179,8 +208,10 @@ class ShellRecipe(Recipe):
 
     def program_name(self):
         if isinstance(self.cmd, list):
-            return self.cmd[0]
-        return shlex.split(self.cmd)[0]
+            cmd = self.cmd[0]
+        else:
+            cmd = shlex.split(self.cmd)[0]
+        return self.shell.interpolate(cmd, {})
 
     def log_stdout(self, line: str, _):
         if not self.quiet:

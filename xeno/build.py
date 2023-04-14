@@ -19,7 +19,7 @@ from xeno.color import color
 from xeno.cookbook import recipe as base_recipe
 from xeno.decorators import named
 from xeno.events import Event, EventBus
-from xeno.recipe import Events, Recipe
+from xeno.recipe import Events, Recipe, FormatF
 from xeno.shell import Environment
 from xeno.utils import async_map
 
@@ -140,11 +140,11 @@ class Engine:
 
     def __init__(self, name="Xeno v5 Build Engine"):
         self.name = name
-        self.bus_hooks: list[BusHook] = []
+        self.bus_hooks: list[BusHook] = list()
         self.env = Environment.context()
         self.injector = AsyncInjector()
 
-    def add_bus_hook(self, hook: BusHook):
+    def add_hook(self, hook: BusHook):
         self.bus_hooks.append(hook)
 
     async def root_targets(self) -> list[tuple[str, Recipe]]:
@@ -183,7 +183,6 @@ class Engine:
                     results.append((joined_name, recipe))
                     visited.add(recipe)
                 results.extend(await self.targets((joined_name, recipe), visited))
-        print(f"LRS-DEBUG: results={results}")
         return results
 
     def default_target(self) -> Optional[str]:
@@ -208,8 +207,11 @@ class Engine:
         *,
         default=False,
         factory=True,
+        fail_f: Optional[FormatF] = None,
         keep=False,
         memoize=True,
+        ok_f: Optional[FormatF] = None,
+        start_f: Optional[FormatF] = None,
         sync=False,
     ):
         """
@@ -351,14 +353,16 @@ class DefaultEngineHook:
         bkt = partial(color, fg='white', render='bold')
         sb = io.StringIO()
         sb.write(bkt('['))
-        sb.write(color(event.context.sigil(), **kwargs))
+        sb.write(color(event.context.sigil(event.context), **kwargs))
         sb.write(bkt(']'))
+        sb.write(' ')
         return sb.getvalue()
 
     def on_clean(self, event):
+        clr = partial(color, fg='white')
         sb = io.StringIO()
         sb.write(self.sigil(event, fg='green', render='bold'))
-        sb.write(f'cleaned {event.data}')
+        sb.write(clr(event.context.clean_f(event.context)))
         print(sb.getvalue())
 
     def on_error(self, event):
@@ -368,10 +372,17 @@ class DefaultEngineHook:
         sb.write(clr(event.data))
         print(sb.getvalue())
 
+    def on_fail(self, event):
+        clr = partial(color, fg='white')
+        sb = io.StringIO()
+        sb.write(self.sigil(event, fg='red', render='bold'))
+        sb.write(clr(event.context.fail_f(event.context)))
+        print(sb.getvalue())
+
     def on_info(self, event: Event):
         clr = partial(color, fg='white', render='dim')
         sb = io.StringIO()
-        sb.write(self.sigil(event, fg='red', render='bold'))
+        sb.write(self.sigil(event, fg='white', render='dim'))
         sb.write(clr(event.data))
         print(sb.getvalue())
 
@@ -379,26 +390,27 @@ class DefaultEngineHook:
         clr = partial(color, fg='white')
         sb = io.StringIO()
         sb.write(self.sigil(event, fg='cyan', render='bold'))
-        sb.write(clr(event.context.start_message()))
+        sb.write(clr(event.context.start_f(event.context)))
         print(sb.getvalue())
 
     def on_success(self, event: Event):
         clr = partial(color, fg='white')
         sb = io.StringIO()
         sb.write(self.sigil(event, fg='green', render='bold'))
-        sb.write(clr(event.context.success_message()))
+        sb.write(clr(event.context.ok_f(event.context)))
         print(sb.getvalue())
 
     def on_warning(self, event: Event):
         clr = partial(color, fg='white')
         sb = io.StringIO()
         sb.write(self.sigil(event, fg='yellow', render='bold'))
-        sb.write(clr(event.context.success_message()))
+        sb.write(clr(event.data))
         print(sb.getvalue())
 
     def __call__(self, bus: EventBus):
         bus.subscribe(Events.CLEAN, self.on_clean)
         bus.subscribe(Events.ERROR, self.on_error)
+        bus.subscribe(Events.FAIL, self.on_fail)
         bus.subscribe(Events.INFO, self.on_info)
         bus.subscribe(Events.START, self.on_start)
         bus.subscribe(Events.SUCCESS, self.on_success)
@@ -406,7 +418,7 @@ class DefaultEngineHook:
 
 # --------------------------------------------------------------------
 engine = Engine()
-engine.add_bus_hook(DefaultEngineHook())
+engine.add_hook(DefaultEngineHook())
 provide = engine.provide
 recipe = engine.recipe
 target = engine.target

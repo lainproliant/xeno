@@ -131,7 +131,7 @@ class Shell:
             final_cmd = cmd.format(**self._env, **redacted_params)
         else:
             final_cmd = shlex.join(
-                [c.format(**self._env, **redacted_params) for c in cmd]
+                [str(c).format(**self._env, **redacted_params) for c in cmd]
             )
 
         return final_cmd

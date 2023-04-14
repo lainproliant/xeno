@@ -5,8 +5,10 @@ import sys
 import tracemalloc
 import unittest
 import uuid
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 from xeno import (
     AsyncInjector,
@@ -32,6 +34,7 @@ from xeno import (
 from xeno.build import Engine, DefaultEngineHook
 from xeno.cookbook import sh
 from xeno.pkg_config import PackageConfig
+from xeno.recipe import Recipe, BuildError
 from xeno.testing import OutputCapture
 
 tracemalloc.start()
@@ -929,7 +932,6 @@ class XenoBuildTests(unittest.TestCase):
 
     def test_basic_build(self):
         engine = build.Engine()
-        engine.add_bus_hook(DefaultEngineHook())
 
         @engine.recipe
         def add(a, b):
@@ -958,10 +960,8 @@ class XenoBuildTests(unittest.TestCase):
         self.assertEqual(result, [3, 5, 7])
 
     def test_shell_recipe_and_async_timing(self):
-        from xeno.build import build, engine, provide, recipe, target
+        from xeno.build import build, provide, recipe, target
         from xeno.cookbook import sh
-
-        engine.add_bus_hook(DefaultEngineHook())
 
         sh.env = dict(CAT="cat")
 
@@ -972,7 +972,7 @@ class XenoBuildTests(unittest.TestCase):
 
         @provide
         def file():
-            return "/proc/cpuinfo"
+            return Path("/proc/cpuinfo")
 
         @target
         def print_file(file):
@@ -1004,7 +1004,6 @@ class XenoBuildTests(unittest.TestCase):
 
     def test_file_target_recipes(self):
         engine = Engine()
-        engine.add_bus_hook(DefaultEngineHook())
 
         uid = str(uuid.uuid4())
 
@@ -1054,15 +1053,82 @@ class XenoBuildTests(unittest.TestCase):
             engine.build("-x")
             self.assertFalse(result[0].exists())
 
-            print(engine.build('-l'))
-            print(engine.build('-L'))
-            print(engine.build('more_hello_files'))
+            print(engine.build("-l"))
+            print(engine.build("-L"))
+            print(engine.build("more_hello_files"))
 
-            print(engine.build('more_hello_files', '-c'))
+            print(engine.build("more_hello_files", "-c"))
 
         finally:
             if os.path.exists(f"/tmp/{uid}"):
                 shutil.rmtree(f"/tmp/{uid}")
+
+    def test_file_components_updated(self):
+        engine = Engine()
+        engine.add_hook(DefaultEngineHook())
+
+        uid = str(uuid.uuid4())
+        output_dir = Path("/tmp") / str(uid)
+
+        try:
+            output_dir.mkdir()
+
+            input_file = output_dir / "input.txt"
+            with open(input_file, "w") as outfile:
+                outfile.write("apples")
+
+            self.assertTrue(input_file.exists())
+            with open(input_file, "r") as infile:
+                self.assertEqual("apples", infile.read())
+
+            @engine.target
+            def copy_file():
+                return sh(
+                    "cat {input} >> {out}", input=input_file, out=output_dir / "out.txt"
+                )
+
+            copy_file_recipe = cast(Recipe, engine.injector.require("copy_file"))
+            self.assertFalse(copy_file_recipe.done())
+
+            engine.build("copy_file")
+            self.assertTrue(copy_file_recipe.done())
+
+            time.sleep(0.25)
+
+            now = datetime.now()
+            input_file = output_dir / "input.txt"
+            with open(input_file, "w") as outfile:
+                outfile.write("oranges")
+
+            time.sleep(0.25)
+
+            self.assertTrue(copy_file_recipe.done())
+            self.assertTrue(copy_file_recipe.outdated(now))
+
+            engine.build("copy_file")
+            now = datetime.now()
+            self.assertTrue(copy_file_recipe.done())
+            self.assertFalse(copy_file_recipe.outdated(now))
+
+        finally:
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+
+    def test_failed_build(self):
+        engine = Engine()
+        engine.add_hook(DefaultEngineHook())
+
+        @engine.recipe
+        def forced_failure():
+            return sh("exit 1")
+
+        @engine.target(default=True)
+        def default_target():
+            return forced_failure()
+
+        with self.assertRaises(BuildError):
+            engine.build()
+
 
 # --------------------------------------------------------------------
 class XenoTestingUtilsTests(unittest.TestCase):
@@ -1075,6 +1141,7 @@ class XenoTestingUtilsTests(unittest.TestCase):
             self.assertEqual(capture.stdout.getvalue(), "Hello!\n")
 
         self.assertIs(sys.stdout, original_stdout)
+
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":
