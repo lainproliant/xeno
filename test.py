@@ -29,7 +29,7 @@ from xeno import (
     singleton,
     using,
 )
-from xeno.build import Engine
+from xeno.build import Engine, DefaultEngineHook
 from xeno.cookbook import sh
 from xeno.pkg_config import PackageConfig
 from xeno.testing import OutputCapture
@@ -929,7 +929,7 @@ class XenoBuildTests(unittest.TestCase):
 
     def test_basic_build(self):
         engine = build.Engine()
-        engine.add_bus_hook(self.bus_hook)
+        engine.add_bus_hook(DefaultEngineHook())
 
         @engine.recipe
         def add(a, b):
@@ -961,7 +961,7 @@ class XenoBuildTests(unittest.TestCase):
         from xeno.build import build, engine, provide, recipe, target
         from xeno.cookbook import sh
 
-        engine.add_bus_hook(self.bus_hook)
+        engine.add_bus_hook(DefaultEngineHook())
 
         sh.env = dict(CAT="cat")
 
@@ -1004,12 +1004,11 @@ class XenoBuildTests(unittest.TestCase):
 
     def test_file_target_recipes(self):
         engine = Engine()
-        engine.add_bus_hook(self.bus_hook)
+        engine.add_bus_hook(DefaultEngineHook())
 
         uid = str(uuid.uuid4())
 
         try:
-
             @engine.provide
             def unique_name():
                 return str(uid)
@@ -1017,7 +1016,7 @@ class XenoBuildTests(unittest.TestCase):
             @engine.recipe
             def hello_file(out):
                 return sh(
-                    "echo 'Hello, world!' > {out}",
+                    "echo 'Making a file...' && echo 'Hello, world!' > {out}",
                     out=out,
                 )
 
@@ -1028,6 +1027,14 @@ class XenoBuildTests(unittest.TestCase):
             @engine.target(default=True)
             def make_hello_file(output_dir):
                 return hello_file(output_dir / "hello.txt")
+
+            @engine.provide
+            def filenames():
+                return ["apples", "bananas", "oranges"]
+
+            @engine.target
+            def more_hello_files(filenames, output_dir):
+                return [hello_file(output_dir / name) for name in filenames]
 
             result = engine.build()
             self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
@@ -1047,10 +1054,15 @@ class XenoBuildTests(unittest.TestCase):
             engine.build("-x")
             self.assertFalse(result[0].exists())
 
+            print(engine.build('-l'))
+            print(engine.build('-L'))
+            print(engine.build('more_hello_files'))
+
+            print(engine.build('more_hello_files', '-c'))
+
         finally:
             if os.path.exists(f"/tmp/{uid}"):
                 shutil.rmtree(f"/tmp/{uid}")
-
 
 # --------------------------------------------------------------------
 class XenoTestingUtilsTests(unittest.TestCase):

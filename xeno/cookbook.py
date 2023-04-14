@@ -77,7 +77,8 @@ def recipe(
                 ]
                 result = f(
                     *scanner.args(Recipe.PassMode.TARGETS),
-                    **scanner.kwargs(Recipe.PassMode.TARGETS))
+                    **scanner.kwargs(Recipe.PassMode.TARGETS),
+                )
 
                 if is_iterable(result):
                     recipes = [*result]

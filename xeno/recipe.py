@@ -283,7 +283,7 @@ class Recipe:
         self.parent_path: list[str] = []
 
     def _contextualize(self, s: str) -> str:
-        return f"(for {self.path()}) {s}"
+        return f"[self.sigil()] {s}"
 
     def _configure(self, parent: "Recipe"):
         self.parent_path = parent.path()
@@ -293,6 +293,17 @@ class Recipe:
 
     def path(self) -> list[str]:
         return [*self.parent_path, self.name]
+
+    def sigil(self):
+        if self.target:
+            return f"{self.name} > {self.target.name}"
+        return self.name
+
+    def start_message(self):
+        return "start"
+
+    def success_message(self):
+        return "ok"
 
     def log(self, event_name: str, data: Any = None):
         bus = EventBus.get()
