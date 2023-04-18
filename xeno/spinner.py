@@ -10,8 +10,8 @@
 import sys
 import asyncio
 import itertools
-from typing import Callable
 from datetime import datetime, timedelta
+from xeno.events import EventBus
 
 from xeno.color import color
 
@@ -29,17 +29,17 @@ DEFAULT_SHAPE = [
 
 class Spinner:
     def __init__(self, message: str, interval: float = 0.05, delay: float = 0.25):
-        ansi_spinner_shape = []
+        shape_array = []
 
         for shape in DEFAULT_SHAPE:
-            ansi_spinner_shape.append(
+            shape_array.append(
                 "".join(
                     [shape[0], color(shape[1:-1], fg="red", render="dim"), shape[-1]]
                 )
             )
 
         self.message = message
-        self.cycle = itertools.cycle(ansi_spinner_shape)
+        self.cycle = itertools.cycle(shape_array)
         self.interval = interval
         self.delay = delay
         self.start = datetime.now()

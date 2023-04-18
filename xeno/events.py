@@ -12,19 +12,13 @@ Asynchronous event dispatch and broadcast.
 """
 
 import asyncio
+import inspect
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import Enum
 from typing import Any, Callable, Generator, Optional
 
 from xeno.utils import async_wrap
-
-
-# --------------------------------------------------------------------
-class DispatchMode(Enum):
-    IMMEDIATE = 0
-    ASYNC = 1
 
 
 # --------------------------------------------------------------------
@@ -45,6 +39,8 @@ EventListener = Callable[[Event], Any]
 
 # --------------------------------------------------------------------
 class EventBus:
+    FRAME = "EventBus.FRAME"
+
     _current_bus: Optional["EventBus"] = None
 
     class _Session:
@@ -82,7 +78,7 @@ class EventBus:
         self._dispatch_sync(event)
 
     def shutdown(self):
-        self.shutdown_flag = True
+        self.shutdown_flag.set()
         self.sync_listeners.clear()
         self.sync_subs.clear()
         self.async_listeners.clear()
@@ -90,16 +86,11 @@ class EventBus:
         while not self.queue.empty():
             self.queue.get_nowait()
 
-    def listen(
-        self,
-        listener: EventListener,
-        dispatch_mode=DispatchMode.IMMEDIATE,
-    ):
-        match dispatch_mode:
-            case DispatchMode.IMMEDIATE:
-                self.sync_listeners.add(listener)
-            case DispatchMode.ASYNC:
-                self.async_listeners.add(listener)
+    def listen(self, listener: EventListener):
+        if inspect.iscoroutinefunction(listener):
+            self.async_listeners.add(listener)
+        else:
+            self.sync_listeners.add(listener)
 
     def unlisten(self, listener: EventListener):
         try:
@@ -112,14 +103,11 @@ class EventBus:
         except KeyError:
             pass
 
-    def subscribe(
-        self, event: str, listener: EventListener, dispatch_mode=DispatchMode.IMMEDIATE
-    ):
-        match dispatch_mode:
-            case DispatchMode.IMMEDIATE:
-                self.sync_subs[event].add(listener)
-            case DispatchMode.ASYNC:
-                self.async_subs[event].add(listener)
+    def subscribe(self, event: str, listener: EventListener):
+        if inspect.iscoroutinefunction(listener):
+            self.async_subs[event].add(listener)
+        else:
+            self.sync_subs[event].add(listener)
 
     def unsubscribe(self, event: str, listener: EventListener):
         subs = self.sync_subs[event]
@@ -139,7 +127,7 @@ class EventBus:
             del self.async_subs[event]
 
     async def run(self):
-        while not self.shutdown_flag:
+        while not self.shutdown_flag.is_set():
             try:
                 event = self.queue.get_nowait()
                 await self._dispatch_async(event)
@@ -147,6 +135,7 @@ class EventBus:
             except asyncio.QueueEmpty:
                 pass
 
+            await self._dispatch_frame_event()
             await asyncio.sleep(0)
 
     def _has_async_listeners_for_event(self, event: Event) -> bool:
@@ -169,6 +158,11 @@ class EventBus:
         yield from self.sync_listeners
         if event.name in self.sync_subs:
             yield from self.sync_subs[event.name]
+
+    async def _dispatch_frame_event(self):
+        event = Event(EventBus.FRAME, self)
+        await self._dispatch_async(event)
+        self._dispatch_sync(event)
 
     def _dispatch_sync(self, event: Event):
         for listener in self._sync_listeners_for_event(event):

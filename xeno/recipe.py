@@ -10,6 +10,8 @@
 import asyncio
 import inspect
 import shutil
+import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
@@ -18,6 +20,9 @@ from typing import Any, Callable, Generator, Iterable, Optional
 from xeno.events import Event, EventBus
 from xeno.shell import PathSpec, Shell
 from xeno.utils import async_map, async_vwrap, async_wrap, is_iterable
+
+# --------------------------------------------------------------------
+UNICODE_SUPPORT = sys.stdout.encoding.lower().startswith("utf")
 
 
 # --------------------------------------------------------------------
@@ -30,6 +35,7 @@ class Events:
     START = "start"
     SUCCESS = "success"
     WARNING = "warning"
+    END = "end"
 
 
 # --------------------------------------------------------------------
@@ -64,11 +70,28 @@ FormatF = Callable[["Recipe"], str]
 # --------------------------------------------------------------------
 class Recipe:
     DEFAULT_TARGET_PARAM = "out"
-    SIGIL_TARGET_SEPARATOR = "→ "
-    START_SYMBOL = "⚙"
-    OK_SYMBOL = "✓"
-    FAIL_SYMBOL = "✗"
-    WARNING_SYMBOL = "⚠"
+    UNICODE_SUPPORT = UNICODE_SUPPORT
+
+    @dataclass
+    class Symbols:
+        target: str
+        start: str
+        ok: str
+        fail: str
+        warning: str
+
+    SYMBOLS: Optional[Symbols] = None
+
+    @classmethod
+    def symbols(cls) -> "Recipe.Symbols":
+        if cls.SYMBOLS is None:
+            if Recipe.UNICODE_SUPPORT:
+                cls.SYMBOLS = Recipe.Symbols(target="→ ", start="⚙", ok="✓", fail="✗", warning="⚠")
+            else:
+                cls.SYMBOLS = Recipe.Symbols(target="->", start="@", ok=":)", fail=":(", warning="/!\\")
+        return cls.SYMBOLS
+
+    count = 0
 
     class PassMode(Enum):
         NORMAL = 0
@@ -88,6 +111,13 @@ class Recipe:
             self._kwarg_keys: list[str] = []
             self._paths: list[Path] = []
 
+        def clear(self):
+            self._args.clear()
+            self._kwargs.clear()
+            self._arg_offsets.clear()
+            self._kwarg_keys.clear()
+            self._paths.clear()
+
         def _scan_one(self, arg) -> tuple[Any, "Recipe.ParamType"]:
             if isinstance(arg, Recipe):
                 return arg, Recipe.ParamType.RECIPE
@@ -106,6 +136,9 @@ class Recipe:
 
         def has_recipes(self):
             return self._arg_offsets or self._kwarg_keys
+
+        def num_recipes(self):
+            return len(self._arg_offsets) + len(self._kwarg_keys)
 
         async def gather_args(self):
             """
@@ -144,11 +177,7 @@ class Recipe:
             return asyncio.gather(self.gather_args(), self.gather_kwargs())
 
         def scan_params(self, *args, **kwargs):
-            self._args.clear()
-            self._arg_offsets.clear()
-            self._kwargs.clear()
-            self._kwarg_keys.clear()
-            self._paths.clear()
+            self.clear()
 
             for i, arg in enumerate(args):
                 self.scan(arg, offset=i)
@@ -264,10 +293,10 @@ class Recipe:
 
         return scanner
 
-    @staticmethod
-    def sigil_format(recipe: "Recipe") -> str:
+    @classmethod
+    def sigil_format(cls, recipe: "Recipe") -> str:
         if recipe.target is not None:
-            return f"{recipe.name}{recipe.SIGIL_TARGET_SEPARATOR}{recipe.target.name}"
+            return f"{recipe.name}{cls.symbols().target}{recipe.target.name}"
         return recipe.name
 
     def __init__(
@@ -296,14 +325,14 @@ class Recipe:
         self.clean_f: FormatF = clean_f or (
             lambda r: f'cleaned {r.target.name if r.target else ""}'
         )
-        self.fail_f: FormatF = fail_f or (lambda _: f"{Recipe.FAIL_SYMBOL} fail")
+        self.fail_f: FormatF = fail_f or (lambda _: f"{self.symbols().fail} fail")
         self.keep = keep
         self.memoize = memoize
         self.name = name
         self.setup = setup
         self.sigil: FormatF = sigil or Recipe.sigil_format
-        self.start_f: FormatF = start_f or (lambda _: f"{Recipe.START_SYMBOL} start")
-        self.ok_f: FormatF = ok_f or (lambda _: f"{Recipe.OK_SYMBOL} ok")
+        self.start_f: FormatF = start_f or (lambda _: f"{self.symbols().start} start")
+        self.ok_f: FormatF = ok_f or (lambda _: f"{self.symbols().ok} ok")
         self.static_files = [Path(s) for s in static_files if s != target]
         self.sync = sync
         self.target = None if target is None else Path(target)
@@ -522,6 +551,8 @@ class Recipe:
                 return self.saved_result
 
             try:
+                Recipe.count += 1
+
                 if self.setup is not None:
                     await self.setup()
 
@@ -533,6 +564,9 @@ class Recipe:
             except Exception as e:
                 self.log(Events.FAIL, e)
                 raise BuildError() from e
+
+            finally:
+                Recipe.count -= 1
 
 
 # --------------------------------------------------------------------
@@ -551,8 +585,8 @@ class Lambda(Recipe):
 
         scanner = Recipe.scan(lambda_args, lambda_kwargs)
         sig = inspect.signature(f)
-        bound_args = sig.bind(*lambda_args, **lambda_kwargs)
-        target = bound_args.arguments.get(target_param, None)
+        self.bound_args = sig.bind(*lambda_args, **lambda_kwargs)
+        target = self.bound_args.arguments.get(target_param, None)
 
         super().__init__(
             scanner.component_list(),
@@ -564,6 +598,9 @@ class Lambda(Recipe):
         self.f = f
         self.pass_mode = pass_mode
         self.scanner = scanner
+
+    def arg(self, name: str):
+        return self.bound_args.arguments.get(name, None)
 
     async def make(self):
         return await async_wrap(

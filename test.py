@@ -1,11 +1,12 @@
 import asyncio
 import os
+import random
 import shutil
 import sys
+import time
 import tracemalloc
 import unittest
 import uuid
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -31,13 +32,14 @@ from xeno import (
     singleton,
     using,
 )
-from xeno.build import Engine, DefaultEngineHook
+from xeno.build import DefaultEngineHook, Engine
 from xeno.cookbook import sh
 from xeno.pkg_config import PackageConfig
-from xeno.recipe import Recipe, BuildError
+from xeno.recipe import BuildError, Recipe
 from xeno.testing import OutputCapture
 
 tracemalloc.start()
+Recipe.UNICODE_SUPPORT = False
 
 
 # --------------------------------------------------------------------
@@ -965,7 +967,7 @@ class XenoBuildTests(unittest.TestCase):
 
         sh.env = dict(CAT="cat")
 
-        @recipe
+        @recipe(sigil=lambda r: f'{r.name}({r.arg("n")}, {r.arg("sec")})')
         async def slowly_make_number(n, sec=1):
             await asyncio.sleep(sec)
             return n
@@ -990,6 +992,10 @@ class XenoBuildTests(unittest.TestCase):
         def two_slow_numbers():
             return [slowly_make_number(5, 2), slowly_make_number(10, 2)]
 
+        @target
+        def lots_of_slow_numbers():
+            return [slowly_make_number(x, random.randint(1, 4)) for x in range(0, 10)]
+
         result = build("print_file", "slow_number")
         self.assertEqual(result, [0, 99])
 
@@ -1002,12 +1008,15 @@ class XenoBuildTests(unittest.TestCase):
         end_time = datetime.now()
         self.assertTrue(end_time - start_time < timedelta(seconds=3))
 
+        result = build("lots_of_slow_numbers")
+
     def test_file_target_recipes(self):
         engine = Engine()
 
         uid = str(uuid.uuid4())
 
         try:
+
             @engine.provide
             def unique_name():
                 return str(uid)

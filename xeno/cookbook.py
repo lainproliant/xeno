@@ -154,9 +154,9 @@ class ShellRecipe(Recipe):
         assert isinstance(recipe, ShellRecipe)
         recipe = cast(ShellRecipe, recipe)
         if recipe.target is not None:
-            return f'{recipe.program_name()}{recipe.SIGIL_TARGET_SEPARATOR}{recipe.target.name}'
+            return f'>_{recipe.program_name()}{recipe.symbols().target}{recipe.target.name}'
         else:
-            return recipe.program_name()
+            return f'>_{recipe.program_name()}'
 
     def __init__(
         self,
