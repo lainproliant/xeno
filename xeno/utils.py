@@ -12,7 +12,7 @@ import inspect
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator, Iterable
 
 from .errors import InjectionError
 
@@ -96,3 +96,11 @@ def resolve_alias(name, aliases, visited=None):
         visited.add(name)
         name = resolve_alias(aliases[name], aliases, set(visited))
     return name
+
+
+# --------------------------------------------------------------------
+def list_or_delim(obj: str | Iterable[str], delim=",") -> Generator[str, None, None]:
+    if isinstance(obj, str):
+        yield from list_or_delim(obj.split(delim))
+    else:
+        yield from obj

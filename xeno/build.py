@@ -11,8 +11,9 @@ import asyncio
 import io
 import sys
 from argparse import ArgumentParser
+from collections import defaultdict
 from functools import partial
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Iterable, Optional, cast
 
 from xeno.async_injector import AsyncInjector
 from xeno.attributes import MethodAttributes
@@ -20,10 +21,9 @@ from xeno.color import color
 from xeno.cookbook import recipe as base_recipe
 from xeno.decorators import named
 from xeno.events import Event, EventBus
-from xeno.recipe import Events, FormatF, Recipe
+from xeno.recipe import BuildError, Events, Recipe
 from xeno.shell import Environment
 from xeno.spinner import Spinner
-from xeno.utils import async_map
 
 # --------------------------------------------------------------------
 EngineHook = Callable[["Engine", EventBus], None]
@@ -49,6 +49,7 @@ class Config:
         self.cleanup_mode = self.CleanupMode.NONE
         self.debug = False
         self.force_color = False
+        self.tasks: list[str] = []
         self.targets: list[str] = []
         self.max_shells: Optional[int] = None
 
@@ -134,10 +135,8 @@ class Config:
 
 # --------------------------------------------------------------------
 class Engine:
-    TARGET_SEP = "::"
-
     class Attributes:
-        TARGET = "xeno.build.target"
+        TARGET = "xeno.build.task"
         DEFAULT = "xeno.build.default"
 
     def __init__(self, name="Xeno v5 Build Engine"):
@@ -150,52 +149,52 @@ class Engine:
     def add_hook(self, hook: EngineHook):
         self.bus_hooks.append(hook)
 
-    async def root_targets(self) -> list[tuple[str, Recipe]]:
-        root_names = [
-            k
-            for k, _ in self.injector.scan_resources(
-                lambda _, v: v.check(self.Attributes.TARGET)
-            )
-        ]
-
-        return await asyncio.gather(
-            *[async_map(name, self.injector.require_async(name)) for name in root_names]
-        )
-
-    async def targets(
-        self,
-        parent: Optional[tuple[str, Recipe]] = None,
-        visited: Optional[set[Recipe]] = None,
-    ) -> list[tuple[str, Recipe]]:
-        results = []
-        visited = visited or set()
+    async def tasks(self, *, parent: Optional[Recipe] = None) -> list[Recipe]:
+        tasks = []
         if parent is None:
-            for name, recipe in await self.root_targets():
-                results.append((name, recipe))
-                if recipe.target:
-                    results.append((str(recipe.target), recipe))
-                visited.add(recipe)
-                results.extend(await self.targets((name, recipe), visited))
-        else:
-            parent_name, parent_recipe = parent
-            for recipe in parent_recipe.components():
-                joined_name = self.TARGET_SEP.join(
-                    [parent_name, str(recipe.target_or(recipe.name))]
+            root_names = [
+                k
+                for k, _ in self.injector.scan_resources(
+                    lambda _, v: v.check(self.Attributes.TARGET)
                 )
-                if recipe not in visited:
-                    results.append((joined_name, recipe))
-                    visited.add(recipe)
-                results.extend(await self.targets((joined_name, recipe), visited))
-        return results
+            ]
 
-    def default_target(self) -> Optional[str]:
+            for name in root_names:
+                recipe = await self.injector.require_async(name)
+                assert isinstance(
+                    recipe, Recipe
+                ), f"Task `{name}` did not yield a recipe."
+
+                recipe.callsign = name
+                tasks.append(recipe)
+                await self.tasks(parent=recipe)
+
+        else:
+            for recipe in parent.components():
+                recipe.parent = parent
+                tasks.append(recipe)
+
+        return tasks
+
+    async def addressable_task_map(self) -> dict[str, Recipe]:
+        all_tasks = [*Recipe.flat(await self.tasks())]
+        callsign_counts: dict[str, int] = defaultdict(lambda: 0)
+        for task in all_tasks:
+            callsign_counts[task.callsign] += 1
+        duplicate_callsigns = [k for k, v in callsign_counts.items() if v > 1]
+        task_map = {t.callsign: t for t in all_tasks}
+        for callsign in duplicate_callsigns:
+            del task_map[callsign]
+        return task_map
+
+    def default_task(self) -> Optional[str]:
         results = [
             k
             for k, _ in self.injector.scan_resources(
                 lambda _, v: v.check(self.Attributes.DEFAULT)
             )
         ]
-        assert len(results) <= 1, "More than one default target specified."
+        assert len(results) <= 1, "More than one default task specified."
         return results[0] if results else None
 
     def provide(self, *args, **kwargs):
@@ -204,30 +203,29 @@ class Engine:
     def recipe(self, *args, **kwargs):
         return base_recipe(*args, **kwargs)
 
-    def target(
+    def task(
         self,
         name_or_f: Optional[str | Callable] = None,
         *,
+        dep: Optional[str | Iterable[str]] = None,
         default=False,
         factory=True,
-        fail_f: Optional[FormatF] = None,
+        fmt: Optional[Recipe.Format] = None,
         keep=False,
         memoize=True,
-        ok_f: Optional[FormatF] = None,
-        start_f: Optional[FormatF] = None,
         sync=False,
     ):
         """
-        Decorator for defining a target recipe for a build.
+        Decorator for defining a task recipe for a build.
 
         Can be called with no parameters.  In this mode, the name is assumed
         to be the name of the decorated function and all other parameters
         are set to their defaults.
 
-        If `default` is True, the target will be the default target
-        when no target is specified at build time.  This method will
-        throw ValueError if another target has already been specified
-        as the default target.
+        If `default` is True, the task will be the default task
+        when no task is specified at build time.  This method will
+        throw ValueError if another task has already been specified
+        as the default task.
 
         See `xeno.cookbook.recipe` for info about the other params, note that
         `factory` and `memoize` params to `xeno.cookbook.recipe()` are always
@@ -240,11 +238,16 @@ class Engine:
             target_wrapper = cast(
                 Recipe,
                 base_recipe(
-                    name, factory=factory, keep=keep, sync=sync, memoize=memoize
+                    name,
+                    dep=dep,
+                    factory=factory,
+                    keep=keep,
+                    sync=sync,
+                    memoize=memoize,
                 )(f),
             )
             attrs = MethodAttributes.for_method(target_wrapper, True, True)
-            assert attrs is not None
+            assert attrs is not None, "MethodAttributes were not written successfully."
             attrs.put(self.Attributes.TARGET)
             if default:
                 attrs.put(self.Attributes.DEFAULT)
@@ -258,31 +261,26 @@ class Engine:
 
         return wrapper
 
-    async def _resolve_targets(self, config: Config) -> list[tuple[str, Recipe]]:
-        target_names = config.targets
-        if not target_names:
-            default_target = self.default_target()
-            if default_target is not None:
-                target_names = [default_target]
+    async def _resolve_tasks(self, config: Config) -> list[Recipe]:
+        task_map = await self.addressable_task_map()
+        task_names = config.targets
+
+        if not task_names:
+            default_task = self.default_task()
+            if default_task is not None:
+                task_names = [default_task]
             else:
-                raise ValueError("No target specified and no default target defined.")
+                raise ValueError("No task specified and no default task defined.")
 
-        targets = await asyncio.gather(
-            *[
-                async_map(name, self.injector.require_async(name))
-                for name in target_names
-            ]
-        )
+        tasks = [task_map[k] for k in task_names]
 
-        for name, target in targets:
-            assert isinstance(
-                target, Recipe
-            ), f"Target `{name}` did not yield a recipe."
+        import pdb
+        pdb.set_trace()
 
-        return targets
+        return tasks
 
-    async def _make_targets(self, config, targets):
-        self.scan.scan_params(*[v for _, v in targets])
+    async def _make_tasks(self, config, tasks):
+        self.scan.scan_params(*tasks)
         while self.scan.has_recipes():
             await self.scan.gather_all()
 
@@ -290,49 +288,64 @@ class Engine:
         self.scan.clear()
         return args
 
-    async def _clean_targets(self, config, targets):
+    async def _clean_tasks(self, config, tasks):
         match config.cleanup_mode:
             case Config.CleanupMode.SHALLOW:
-                return await asyncio.gather(*[t.clean() for _, t in targets])
+                return await asyncio.gather(*[task.clean() for task in tasks])
             case Config.CleanupMode.RECURSIVE:
                 return await asyncio.gather(
-                    *[t.clean() for _, t in targets],
-                    *[t.clean_components() for _, t in targets],
+                    *[task.clean() for task in tasks],
+                    *[task.clean_components(recursive=True) for task in tasks],
                 )
             case _:
                 raise ValueError("Config.cleanup_mode not specified.")
 
-    async def _list_targets(self):
-        targets = sorted(await self.root_targets())
-        for name, _ in targets:
-            print(name)
-        return targets
+    def _list_tasks(self, tasks: Iterable[Recipe]):
+        tasks = sorted(tasks, key=lambda t: t.name)
+        for task in tasks:
+            print(task.name)
+        return tasks
 
-    async def _list_target_tree(self):
-        targets = sorted(await self.targets())
-        for name, _ in targets:
-            print(name)
-        return targets
+    def _list_task_tree(
+        self,
+        tasks: Iterable[Recipe],
+        indent=0,
+        visited: Optional[set[Recipe]] = None,
+    ):
+        visited = visited or set()
+        tasks = sorted((t for t in tasks if t not in visited), key=lambda t: t.callsign)
+        new_visited = visited | set(tasks)
+
+        for task in tasks:
+            if indent > 0:
+                print(f"{'  ' * indent} ⮡ {task.callsign}")
+            else:
+                print(f"{task.callsign}")
+
+            if task not in visited:
+                self._list_task_tree(task.children, indent + 1, new_visited)
+
+        return 0
 
     async def build_async(self, *argv) -> list[Any]:
         bus = EventBus.get()
 
         try:
             config = Config("Xeno Build Engine v5").parse_args(*argv)
-            targets = await self._resolve_targets(config)
+            tasks = await self._resolve_tasks(config)
 
             match config.mode:
                 case Config.Mode.BUILD:
-                    return await self._make_targets(config, targets)
+                    return await self._make_tasks(config, tasks)
                 case Config.Mode.CLEAN:
-                    return await self._clean_targets(config, targets)
+                    return await self._clean_tasks(config, tasks)
                 case Config.Mode.LIST:
-                    return await self._list_targets()
+                    return self._list_tasks(await self.tasks())
                 case Config.Mode.REBUILD:
-                    await self._clean_targets(config, targets)
-                    return await self._make_targets(config, targets)
+                    await self._clean_tasks(config, tasks)
+                    return await self._make_tasks(config, tasks)
                 case Config.Mode.TREE:
-                    return await self._list_target_tree()
+                    return self._list_task_tree(await self.tasks())
                 case _:
                     raise RuntimeError("Unknown mode encountered.")
 
@@ -343,12 +356,19 @@ class Engine:
         result, _ = await asyncio.gather(self.build_async(*argv), bus.run())
         return result
 
-    def build(self, *argv):
-        with EventBus.session():
-            bus = EventBus.get()
-            for hook in self.bus_hooks:
-                hook(self, bus)
-            return asyncio.run(self._build_loop(bus, *argv))
+    def build(self, *argv, raise_errors=True):
+        try:
+            with EventBus.session():
+                bus = EventBus.get()
+                for hook in self.bus_hooks:
+                    hook(self, bus)
+                return asyncio.run(self._build_loop(bus, *argv))
+            print("OK")
+
+        except BuildError as e:
+            print("FAIL")
+            if raise_errors:
+                raise e
 
 
 # --------------------------------------------------------------------
@@ -367,20 +387,23 @@ class DefaultEngineHook:
         bkt = partial(color, fg="white", render="bold")
         sb = io.StringIO()
         sb.write(bkt("["))
-        sb.write(color(event.context.sigil(event.context), **kwargs))
+        sigil = event.context.sigil().replace(
+            Recipe.SIGIL_DELIMITER, event.context.fmt.symbols.target
+        )
+        sb.write(color(sigil, **kwargs))
         sb.write(bkt("]"))
         sb.write(" ")
         return sb.getvalue()
 
     async def on_frame(self, event):
-        self.spinner.message = f"resolving [{Recipe.count}]"
+        self.spinner.message = f"resolving [{len(Recipe.active)}]"
         self._clear_chars = await self.spinner.spin()
 
     def on_clean(self, event):
         clr = partial(color, fg="white")
         sb = io.StringIO()
         sb.write(self.sigil(event, fg="green", render="bold"))
-        sb.write(clr(event.context.clean_f(event.context)))
+        sb.write(clr(event.context.fmt.clean(event.context)))
         self.print(sb.getvalue())
 
     def on_error(self, event):
@@ -394,7 +417,7 @@ class DefaultEngineHook:
         clr = partial(color, fg="white")
         sb = io.StringIO()
         sb.write(self.sigil(event, fg="red", render="bold"))
-        sb.write(clr(event.context.fail_f(event.context)))
+        sb.write(clr(event.context.fmt.fail(event.context)))
         self.print(sb.getvalue())
 
     def on_info(self, event: Event):
@@ -408,14 +431,14 @@ class DefaultEngineHook:
         clr = partial(color, fg="white")
         sb = io.StringIO()
         sb.write(self.sigil(event, fg="cyan", render="bold"))
-        sb.write(clr(event.context.start_f(event.context)))
+        sb.write(clr(event.context.fmt.start(event.context)))
         self.print(sb.getvalue())
 
     def on_success(self, event: Event):
         clr = partial(color, fg="white")
         sb = io.StringIO()
         sb.write(self.sigil(event, fg="green", render="bold"))
-        sb.write(clr(event.context.ok_f(event.context)))
+        sb.write(clr(event.context.fmt.ok(event.context)))
         self.print(sb.getvalue())
 
     def on_warning(self, event: Event):
@@ -441,5 +464,9 @@ engine = Engine()
 engine.add_hook(DefaultEngineHook())
 provide = engine.provide
 recipe = engine.recipe
-target = engine.target
-build = engine.build
+task = engine.task
+
+
+# --------------------------------------------------------------------
+def build():
+    return engine.build(*sys.argv[1:], raise_errors=False)
