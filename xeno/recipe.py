@@ -40,7 +40,9 @@ class Events:
 
 # --------------------------------------------------------------------
 class BuildError(Exception):
-    pass
+    def __init__(self, recipe: "Recipe", msg=""):
+        super().__init__(f"[{recipe.callsign()}] {msg}")
+        self.recipe = recipe
 
 
 # --------------------------------------------------------------------
@@ -56,42 +58,68 @@ class CompositeError(Exception):
         sb.append(msg)
 
         for exc in self.exceptions:
+            sb.append(f"  {exc.__class__.__qualname__}")
             for line in str(exc).strip().split("\n"):
-                sb.append("\t" + line)
+                if line.strip():
+                    sb.append("    " + line.strip())
         return "\n".join(sb)
 
 
 # --------------------------------------------------------------------
 ListedComponents = Iterable["Recipe"]
 MappedComponents = dict[str, "Recipe" | Iterable["Recipe"]]
-FormatF = Callable[["Recipe"], str]
 
 
 # --------------------------------------------------------------------
 class Recipe:
-    DEFAULT_TARGET_PARAM = "out"
-    UNICODE_SUPPORT = UNICODE_SUPPORT
+    DEFAULT_TARGET_PARAM = "target"
 
-    @dataclass
-    class Symbols:
-        target: str
-        start: str
-        ok: str
-        fail: str
-        warning: str
+    active: set["Recipe"] = set()
 
-    SYMBOLS: Optional[Symbols] = None
+    class Format:
+        @dataclass
+        class Symbols:
+            target: str
+            start: str
+            ok: str
+            fail: str
+            warning: str
 
-    @classmethod
-    def symbols(cls) -> "Recipe.Symbols":
-        if cls.SYMBOLS is None:
-            if Recipe.UNICODE_SUPPORT:
-                cls.SYMBOLS = Recipe.Symbols(target="→ ", start="⚙", ok="✓", fail="✗", warning="⚠")
+        def __init__(self, unicode_symbols=True):
+            if UNICODE_SUPPORT and unicode_symbols:
+                self.symbols = self.Symbols(
+                    target="→ ", start="⚙", ok="✓", fail="✗", warning="⚠"
+                )
             else:
-                cls.SYMBOLS = Recipe.Symbols(target="->", start="@", ok=":)", fail=":(", warning="/!\\")
-        return cls.SYMBOLS
+                self.SYMBOLS = self.Symbols(
+                    target="->", start="(*)", ok=":)", fail=":(", warning="/!\\"
+                )
 
-    count = 0
+        def callsign(self, recipe: "Recipe") -> str:
+            if recipe.has_target():
+                return f"{recipe.name}:{recipe.rtarget()}"
+            return recipe.name
+
+        def clean(self, recipe: "Recipe") -> str:
+            sb: list[str | Path] = []
+            sb.append("cleaned")
+            if recipe.has_target():
+                sb.append(recipe.target)
+            return " ".join([str(s) for s in sb])
+
+        def fail(self, recipe: "Recipe") -> str:
+            return f"{self.symbols.fail} fail"
+
+        def ok(self, recipe: "Recipe") -> str:
+            return f"{self.symbols.ok} ok"
+
+        def sigil(self, recipe: "Recipe") -> str:
+            if recipe.has_target():
+                return f"{recipe.name}{self.symbols.target}{recipe.rtarget()}"
+            return recipe.name
+
+        def start(self, recipe: "Recipe") -> str:
+            return f"{self.symbols.start} start"
 
     class PassMode(Enum):
         NORMAL = 0
@@ -263,13 +291,23 @@ class Recipe:
         def component_map(self) -> MappedComponents:
             return {k: self._kwargs[k] for k in self._kwarg_keys}
 
-        def components(self) -> Generator["Recipe", None, None]:
-            yield from self.component_list()
+        def _flat_listed_components(self) -> Generator["Recipe", None, None]:
+            for c in self.component_list():
+                if isinstance(c, Recipe):
+                    yield c
+                else:
+                    yield from c
+
+        def _flat_mapped_components(self) -> Generator["Recipe", None, None]:
             for c in self.component_map().values():
                 if isinstance(c, Recipe):
                     yield c
                 else:
                     yield from c
+
+        def components(self) -> Generator["Recipe", None, None]:
+            yield from self._flat_listed_components()
+            yield from self._flat_mapped_components()
 
     @staticmethod
     def scan(args: Iterable[Any], kwargs: dict[str, Any]) -> Scanner:
@@ -293,27 +331,17 @@ class Recipe:
 
         return scanner
 
-    @classmethod
-    def sigil_format(cls, recipe: "Recipe") -> str:
-        if recipe.target is not None:
-            return f"{recipe.name}{cls.symbols().target}{recipe.target.name}"
-        return recipe.name
-
     def __init__(
         self,
         component_list: ListedComponents = [],
         component_map: MappedComponents = {},
         *,
         as_user: Optional[str] = None,
-        clean_f: Optional[FormatF] = None,
-        fail_f: Optional[FormatF] = None,
+        fmt: Format = Format(),
         keep=False,
         memoize=False,
         name="(nameless)",
-        ok_f: Optional[FormatF] = None,
         setup: Optional["Recipe"] = None,
-        sigil: Optional[FormatF] = None,
-        start_f: Optional[FormatF] = None,
         static_files: Iterable[PathSpec] = [],
         sync=False,
         target: Optional[PathSpec] = None,
@@ -322,27 +350,18 @@ class Recipe:
         self.component_map = component_map
 
         self.as_user = as_user
-        self.clean_f: FormatF = clean_f or (
-            lambda r: f'cleaned {r.target.name if r.target else ""}'
-        )
-        self.fail_f: FormatF = fail_f or (lambda _: f"{self.symbols().fail} fail")
+        self.fmt = fmt
         self.keep = keep
         self.memoize = memoize
         self.name = name
         self.setup = setup
-        self.sigil: FormatF = sigil or Recipe.sigil_format
-        self.start_f: FormatF = start_f or (lambda _: f"{self.symbols().start} start")
-        self.ok_f: FormatF = ok_f or (lambda _: f"{self.symbols().ok} ok")
         self.static_files = [Path(s) for s in static_files if s != target]
         self.sync = sync
-        self.target = None if target is None else Path(target)
+        self._target = None if target is None else Path(target)
 
         self.lock = asyncio.Lock()
         self.saved_result = None
         self.parent_path: list[str] = []
-
-    def _contextualize(self, s: str) -> str:
-        return f"[{self.sigil(self)}] {s}"
 
     def _configure(self, parent: "Recipe"):
         self.parent_path = parent.path()
@@ -350,8 +369,20 @@ class Recipe:
         for r in self.components():
             r._configure(self)
 
+    @property
+    def target(self) -> Path:
+        assert self._target is not None, "There is no target."
+        return self._target
+
+    @target.setter
+    def target(self, path: Path):
+        self._target = path
+
     def path(self) -> list[str]:
         return [*self.parent_path, self.name]
+
+    def callsign(self) -> str:
+        return self.fmt.callsign(self)
 
     def log(self, event_name: str, data: Any = None):
         bus = EventBus.get()
@@ -359,7 +390,7 @@ class Recipe:
         bus.send(event)
 
     def error(self, msg) -> RuntimeError:
-        exc = RuntimeError(self._contextualize(msg))
+        exc = RuntimeError(msg)
         self.log(Events.ERROR, exc)
         return exc
 
@@ -383,12 +414,12 @@ class Recipe:
         yield from self.components()
 
     def composite_error(self, exceptions: Iterable[Exception], msg: str):
-        exc = CompositeError(exceptions, self._contextualize(msg))
+        exc = CompositeError(exceptions, msg)
         self.log(Events.ERROR, exc)
         return exc
 
     def age(self, ref: datetime) -> timedelta:
-        if self.target is not None and self.target.exists():
+        if self.has_target() and self.target.exists():
             return ref - datetime.fromtimestamp(self.target.stat().st_mtime)
         return timedelta.min
 
@@ -425,8 +456,8 @@ class Recipe:
         return results, mapped_results
 
     def done(self) -> bool:
-        if self.target is not None:
-            return self.target.exists()
+        if self.has_target():
+            return self.target.exists() and not self.outdated(datetime.now())
         return self.saved_result is not None
 
     def components_done(self) -> bool:
@@ -436,7 +467,7 @@ class Recipe:
         return self.age(ref) > self.inputs_age(ref)
 
     async def clean(self):
-        if self.target is None or not self.target.exists() or self.keep:
+        if not self.has_target() or not self.target.exists() or self.keep:
             return
 
         try:
@@ -460,10 +491,16 @@ class Recipe:
         self.saved_result = None
         self.log(Events.CLEAN, self.target)
 
-    async def clean_components(self):
-        results = await asyncio.gather(
-            *(c.clean() for c in self.components()), return_exceptions=True
-        )
+    async def clean_components(self, recursive=False):
+        if recursive:
+            return await asyncio.gather(
+                *[c.clean() for c in self.components()],
+                *[c.clean_components() for c in self.components()],
+            )
+        else:
+            results = await asyncio.gather(
+                *(c.clean() for c in self.components()), return_exceptions=True
+            )
         exceptions = [e for e in results if isinstance(e, Exception)]
         if exceptions:
             raise self.composite_error(
@@ -497,6 +534,8 @@ class Recipe:
         return [r.result() for r in self.components()]
 
     def result(self):
+        if self.done() and self.has_target():
+            return self.target
         if self.saved_result is None:
             raise ValueError("Recipe result has not yet been recorded.")
         return self.saved_result
@@ -507,13 +546,29 @@ class Recipe:
         except ValueError:
             return other
 
+    def has_target(self):
+        return self._target is not None
+
+    def rtarget(self):
+        try:
+            return self.target.relative_to(Path.cwd())
+        except ValueError:
+            return self.target
+
+    def rtarget_or(self, other):
+        if self._target is None:
+            return other
+        return self.rtarget()
+
     def target_or(self, other):
-        if self.target is None:
+        if self._target is None:
             return other
         return self.target
 
     async def _resolve(self):
         await self.make_components()
+
+        self.log(Events.START)
         result = await self.make()
 
         if is_iterable(result):
@@ -527,7 +582,7 @@ class Recipe:
                 result._configure(self)
                 result = await result()
 
-        if self.target is not None:
+        if self.has_target():
             assert isinstance(
                 result, str | Path
             ), "Recipe declared a file target, but the result was not a string or Path object."
@@ -547,26 +602,28 @@ class Recipe:
 
     async def __call__(self):
         async with self.lock:
-            if self.memoize and self.done() and not self.outdated(datetime.now()):
-                return self.saved_result
+            if self.done():
+                if self.has_target():
+                    return self.target
+                elif self.memoize:
+                    return self.saved_result
 
             try:
-                Recipe.count += 1
+                Recipe.active.add(self)
 
                 if self.setup is not None:
                     await self.setup()
 
-                self.log(Events.START)
                 result = await self._resolve()
                 self.log(Events.SUCCESS)
                 return result
 
             except Exception as e:
                 self.log(Events.FAIL, e)
-                raise BuildError() from e
+                raise BuildError(self, str(e)) from e
 
             finally:
-                Recipe.count -= 1
+                Recipe.active.remove(self)
 
 
 # --------------------------------------------------------------------

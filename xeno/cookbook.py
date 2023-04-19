@@ -9,10 +9,11 @@
 import inspect
 import shlex
 from enum import Enum
+from pathlib import Path
 from typing import Callable, Iterable, Optional, Union, cast, no_type_check
 
 from xeno.attributes import MethodAttributes
-from xeno.recipe import Events, Lambda, Recipe, FormatF
+from xeno.recipe import Events, Lambda, Recipe
 from xeno.shell import Environment, PathSpec, Shell
 from xeno.utils import is_iterable
 
@@ -21,14 +22,10 @@ from xeno.utils import is_iterable
 def recipe(
     name_or_f: Optional[str | Callable] = None,
     *,
-    clean_f: Optional[FormatF] = None,
     factory=False,
-    fail_f: Optional[FormatF] = None,
+    fmt: Optional[Recipe.Format] = None,
     keep=False,
     memoize=False,
-    ok_f: Optional[FormatF] = None,
-    sigil: Optional[FormatF] = None,
-    start_f: Optional[FormatF] = None,
     sync=False,
 ):
     """
@@ -78,12 +75,16 @@ def recipe(
 
                 scanner = Recipe.scan(args, kwargs)
                 target_components = [
-                    c for c in scanner.components() if c.target is not None
+                    c for c in scanner.components() if c.has_target()
                 ]
                 result = f(
-                    *scanner.args(Recipe.PassMode.TARGETS),
-                    **scanner.kwargs(Recipe.PassMode.TARGETS),
+                    *scanner.args(Recipe.PassMode.NORMAL),
+                    **scanner.kwargs(Recipe.PassMode.NORMAL),
                 )
+
+                if truename == 'tests':
+                    import pdb
+                    pdb.set_trace()
 
                 if is_iterable(result):
                     recipes = [*result]
@@ -92,28 +93,20 @@ def recipe(
 
                     result = Recipe(
                         [*result],
-                        clean_f=clean_f,
-                        fail_f=fail_f,
+                        fmt=fmt or Recipe.Format(),
                         keep=keep,
                         memoize=memoize,
                         name=truename,
-                        ok_f=ok_f,
-                        sigil=sigil,
-                        start_f=start_f,
                         sync=sync,
                     )
                 else:
                     result = cast(Recipe, result)
                     result.component_list.extend(target_components)
 
-                    result.clean_f = clean_f or result.clean_f
-                    result.fail_f = fail_f or result.fail_f
+                    result.fmt = fmt or result.fmt
                     result.keep = keep
                     result.memoize = memoize
                     result.name = truename
-                    result.ok_f = ok_f or result.ok_f
-                    result.sigil = sigil or result.sigil
-                    result.start_f = start_f or result.start_f
                     result.sync = sync
 
                 return result
@@ -122,12 +115,10 @@ def recipe(
                 f,
                 [*args],
                 {**kwargs},
+                fmt=fmt or Recipe.Format(),
                 keep=keep,
                 memoize=memoize,
                 name=truename,
-                ok_f=ok_f,
-                sigil=sigil,
-                start_f=start_f,
                 sync=sync,
             )
 
@@ -149,14 +140,14 @@ class ShellRecipe(Recipe):
 
     ResultSpec = Iterable[Result] | Result
 
-    @staticmethod
-    def sigil_format(recipe: Recipe) -> str:
-        assert isinstance(recipe, ShellRecipe)
-        recipe = cast(ShellRecipe, recipe)
-        if recipe.target is not None:
-            return f'>_{recipe.program_name()}{recipe.symbols().target}{recipe.target.name}'
-        else:
-            return f'>_{recipe.program_name()}'
+    class Format(Recipe.Format):
+        def sigil(self, recipe: Recipe) -> str:
+            assert isinstance(recipe, ShellRecipe)
+            recipe = cast(ShellRecipe, recipe)
+            if recipe.has_target():
+                return f"{recipe.program_name()}{self.symbols.target}{recipe.rtarget()}"
+            else:
+                return f"{recipe.program_name()}"
 
     def __init__(
         self,
@@ -175,7 +166,9 @@ class ShellRecipe(Recipe):
         sync=False,
         **kwargs,
     ):
-        self.env = Environment.context() if env is None else Environment.context() + env
+        self.env = (
+            Environment.context() if env is None else {**Environment.context(), **env}
+        )
         self.shell = Shell(self.env, cwd)
 
         target = None
@@ -184,7 +177,9 @@ class ShellRecipe(Recipe):
             target = kwargs[Recipe.DEFAULT_TARGET_PARAM]
 
         self.as_user = as_user
-        self.cmd: list[str] | str = cmd if isinstance(cmd, str) else list(cmd)
+        self.cmd: list[str] | str = (
+            str(cmd) if isinstance(cmd, str | Path) else list(cmd)
+        )
         self.expected_code = code
         self.interact = interact
         self.quiet = quiet
@@ -195,12 +190,14 @@ class ShellRecipe(Recipe):
             [],
             self.scanner.component_map(),
             memoize=memoize,
-            name=name or self.program_name(),
-            sigil=ShellRecipe.sigil_format,
+            name=name,
+            fmt=ShellRecipe.Format(),
             static_files=self.scanner.paths(),
             sync=sync,
             target=target,
         )
+
+        self.name = self.name or self.program_name()
 
         self.return_code: Optional[int] = None
         self.stdout_lines: list[str] = []
@@ -211,6 +208,10 @@ class ShellRecipe(Recipe):
             cmd = self.cmd[0]
         else:
             cmd = shlex.split(self.cmd)[0]
+        try:
+            cmd = str(Path(cmd).relative_to(Path.cwd()))
+        except ValueError:
+            pass
         return self.shell.interpolate(cmd, {})
 
     def log_stdout(self, line: str, _):
@@ -264,7 +265,7 @@ class ShellRecipe(Recipe):
 
     def _compute_result(self):
         if self.result_spec is None:
-            if self.target is not None:
+            if self.has_target():
                 result = ShellRecipe.Result.FILE
             else:
                 result = ShellRecipe.Result.CODE
@@ -284,7 +285,7 @@ def sh(
     **kwargs,
 ):
     if "env" in kwargs:
-        kwargs["env"] = sh.env + kwargs["env"]
+        kwargs["env"] = {**sh.env, **kwargs["env"]}
     elif sh.env:
         kwargs["env"] = sh.env
     return ShellRecipe(cmd, **kwargs)

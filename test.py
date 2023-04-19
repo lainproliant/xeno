@@ -943,15 +943,15 @@ class XenoBuildTests(unittest.TestCase):
         def add_and_two(a, b):
             return add(add(a, b), 2)
 
-        @engine.target
+        @engine.task
         def make_three():
             return add(1, 2)
 
-        @engine.target
+        @engine.task
         def make_five(make_three):
             return add(2, make_three)
 
-        @engine.target(default=True)
+        @engine.task(default=True)
         def make_seven(make_five):
             return add_and_two(make_five, 0)
 
@@ -962,12 +962,16 @@ class XenoBuildTests(unittest.TestCase):
         self.assertEqual(result, [3, 5, 7])
 
     def test_shell_recipe_and_async_timing(self):
-        from xeno.build import build, provide, recipe, target
+        from xeno.build import provide, recipe, task, engine
         from xeno.cookbook import sh
 
         sh.env = dict(CAT="cat")
 
-        @recipe(sigil=lambda r: f'{r.name}({r.arg("n")}, {r.arg("sec")})')
+        class Format(Recipe.Format):
+            def sigil(self, r):
+                return f'{r.name}({r.arg("n")}, {r.arg("sec")})'
+
+        @recipe(fmt=Format())
         async def slowly_make_number(n, sec=1):
             await asyncio.sleep(sec)
             return n
@@ -976,39 +980,39 @@ class XenoBuildTests(unittest.TestCase):
         def file():
             return Path("/proc/cpuinfo")
 
-        @target
+        @task
         def print_file(file):
             return sh("{CAT} {file}", file=file)
 
-        @target
+        @task
         def slow_number():
             return slowly_make_number(99)
 
-        @target
+        @task
         def print_file_2(file):
             return sh(["{CAT}", file], interact=True)
 
-        @target
+        @task
         def two_slow_numbers():
             return [slowly_make_number(5, 2), slowly_make_number(10, 2)]
 
-        @target
+        @task
         def lots_of_slow_numbers():
             return [slowly_make_number(x, random.randint(1, 4)) for x in range(0, 10)]
 
-        result = build("print_file", "slow_number")
+        result = engine.build("print_file", "slow_number")
         self.assertEqual(result, [0, 99])
 
-        result = build("print_file_2", "slow_number")
+        result = engine.build("print_file_2", "slow_number")
         self.assertEqual(result, [0, 99])
 
         start_time = datetime.now()
-        result = build("two_slow_numbers")
+        result = engine.build("two_slow_numbers")
         self.assertEqual(result, [[5, 10]])
         end_time = datetime.now()
         self.assertTrue(end_time - start_time < timedelta(seconds=3))
 
-        result = build("lots_of_slow_numbers")
+        result = engine.build("lots_of_slow_numbers")
 
     def test_file_target_recipes(self):
         engine = Engine()
@@ -1022,27 +1026,27 @@ class XenoBuildTests(unittest.TestCase):
                 return str(uid)
 
             @engine.recipe
-            def hello_file(out):
+            def hello_file(target):
                 return sh(
-                    "echo 'Making a file...' && echo 'Hello, world!' > {out}",
-                    out=out,
+                    "echo 'Making a file...' && echo 'Hello, world!' > {target}",
+                    target=target,
                 )
 
-            @engine.target(keep=True)
+            @engine.task(keep=True)
             def output_dir(unique_name):
-                return sh("mkdir {out}", out=Path("/tmp") / unique_name)
+                return sh("mkdir {target}", target=Path("/tmp") / unique_name)
 
-            @engine.target(default=True)
+            @engine.task(default=True)
             def make_hello_file(output_dir):
-                return hello_file(output_dir / "hello.txt")
+                return hello_file(output_dir.target / "hello.txt")
 
             @engine.provide
             def filenames():
                 return ["apples", "bananas", "oranges"]
 
-            @engine.target
+            @engine.task
             def more_hello_files(filenames, output_dir):
-                return [hello_file(output_dir / name) for name in filenames]
+                return [hello_file(output_dir.target / name) for name in filenames]
 
             result = engine.build()
             self.assertEqual(str(result[0]), f"/tmp/{uid}/hello.txt")
@@ -1090,10 +1094,10 @@ class XenoBuildTests(unittest.TestCase):
             with open(input_file, "r") as infile:
                 self.assertEqual("apples", infile.read())
 
-            @engine.target
+            @engine.task
             def copy_file():
                 return sh(
-                    "cat {input} >> {out}", input=input_file, out=output_dir / "out.txt"
+                    "cat {input} >> {target}", input=input_file, target=output_dir / "out.txt"
                 )
 
             copy_file_recipe = cast(Recipe, engine.injector.require("copy_file"))
@@ -1111,7 +1115,7 @@ class XenoBuildTests(unittest.TestCase):
 
             time.sleep(0.25)
 
-            self.assertTrue(copy_file_recipe.done())
+            self.assertFalse(copy_file_recipe.done())
             self.assertTrue(copy_file_recipe.outdated(now))
 
             engine.build("copy_file")
@@ -1131,7 +1135,7 @@ class XenoBuildTests(unittest.TestCase):
         def forced_failure():
             return sh("exit 1")
 
-        @engine.target(default=True)
+        @engine.task(default=True)
         def default_target():
             return forced_failure()
 
