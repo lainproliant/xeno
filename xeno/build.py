@@ -11,9 +11,8 @@ import asyncio
 import io
 import sys
 from argparse import ArgumentParser
-from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Callable, Generator, Optional, cast
+from typing import Any, Callable, Generator, Iterable, Optional, cast
 
 from xeno.async_injector import AsyncInjector
 from xeno.attributes import MethodAttributes
@@ -133,27 +132,6 @@ class Config:
 
 
 # --------------------------------------------------------------------
-@dataclass
-class Task:
-    name: str
-    recipe: Recipe
-    parent: Optional["Task"] = None
-    subtasks: list["Task"] = field(default_factory=list)
-
-    @classmethod
-    def flat(
-        self, tasks: list["Task"], visited: Optional[set[str]] = None
-    ) -> Generator["Task", None, None]:
-        visited = visited or set()
-
-        for task in tasks:
-            if task.name not in visited:
-                visited.add(task.name)
-                yield task
-            yield from Task.flat(task.subtasks, visited)
-
-
-# --------------------------------------------------------------------
 class Engine:
     class Attributes:
         TARGET = "xeno.build.task"
@@ -169,7 +147,7 @@ class Engine:
     def add_hook(self, hook: EngineHook):
         self.bus_hooks.append(hook)
 
-    async def tasks(self, parent: Optional[Task] = None) -> list[Task]:
+    async def tasks(self, *, parent: Optional[Recipe] = None) -> list[Recipe]:
         tasks = []
         if parent is None:
             root_names = [
@@ -184,15 +162,14 @@ class Engine:
                 assert isinstance(
                     recipe, Recipe
                 ), f"Task `{name}` did not yield a recipe."
-                task = Task(name, recipe)
-                task.subtasks = await self.tasks(task)
-                tasks.append(task)
+
+                recipe.callsign = name
+                tasks.append(recipe)
+
         else:
             for recipe in parent.recipe.components():
-                task = Task(recipe.callsign(), recipe)
-                task.parent = parent
-                task.subtasks = await self.tasks(task)
-                tasks.append(task)
+                recipe.parent = parent
+                tasks.append(recipe)
 
         return tasks
 
@@ -432,7 +409,7 @@ class DefaultEngineHook:
         self.print(sb.getvalue())
 
     def on_debug_interval(self, event: Event):
-        print(f"LRS-DEBUG: {(r.callsign() for r in Recipe.active)}")
+        print(f"LRS-DEBUG: {(r.sigil() for r in Recipe.active)}")
 
     def __call__(self, engine: Engine, bus: EventBus):
         bus.subscribe(Events.CLEAN, self.on_clean)

@@ -11,6 +11,7 @@ import asyncio
 import inspect
 import shutil
 import sys
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -41,7 +42,7 @@ class Events:
 # --------------------------------------------------------------------
 class BuildError(Exception):
     def __init__(self, recipe: "Recipe", msg=""):
-        super().__init__(f"[{recipe.callsign()}] {msg}")
+        super().__init__(f"[{recipe.sigil()}] {msg}")
         self.recipe = recipe
 
 
@@ -309,8 +310,8 @@ class Recipe:
             yield from self._flat_listed_components()
             yield from self._flat_mapped_components()
 
-    @staticmethod
-    def scan(args: Iterable[Any], kwargs: dict[str, Any]) -> Scanner:
+    @classmethod
+    def scan(cls, args: Iterable[Any], kwargs: dict[str, Any]) -> Scanner:
         """
         Scan the given arguments for recipes, and return a tuple of offsets
         and keys where the recipes or recipe lists were found.
@@ -331,29 +332,43 @@ class Recipe:
 
         return scanner
 
+    @classmethod
+    def flat(
+        cls, recipes: Iterable["Recipe"], visited: Optional[set["Recipe"]] = None
+    ) -> Generator["Recipe", None, None]:
+        visited = visited or set()
+
     def __init__(
         self,
         component_list: ListedComponents = [],
         component_map: MappedComponents = {},
         *,
         as_user: Optional[str] = None,
+        deps: Iterable["Recipe"] = [],
         fmt: Format = Format(),
         keep=False,
         memoize=False,
         name="(nameless)",
+        parent: Optional["Recipe"] = None,
         setup: Optional["Recipe"] = None,
         static_files: Iterable[PathSpec] = [],
         sync=False,
         target: Optional[PathSpec] = None,
     ):
+        self.id = uuid.uuid4()
         self.component_list = component_list
         self.component_map = component_map
+        self.children: list["Recipe"] = []
+        self._parent: Optional["Recipe"] = None
+        self._callsign = ""
 
         self.as_user = as_user
+        self.deps = [*deps]
         self.fmt = fmt
         self.keep = keep
         self.memoize = memoize
         self.name = name
+        self.parent = parent
         self.setup = setup
         self.static_files = [Path(s) for s in static_files if s != target]
         self.sync = sync
@@ -361,13 +376,9 @@ class Recipe:
 
         self.lock = asyncio.Lock()
         self.saved_result = None
-        self.parent_path: list[str] = []
 
-    def _configure(self, parent: "Recipe"):
-        self.parent_path = parent.path()
-        self.memoize = parent.memoize
-        for r in self.components():
-            r._configure(self)
+    def __hash__(self):
+        return hash(self.id)
 
     @property
     def target(self) -> Path:
@@ -378,11 +389,34 @@ class Recipe:
     def target(self, path: Path):
         self._target = path
 
-    def path(self) -> list[str]:
-        return [*self.parent_path, self.name]
+    def has_target(self):
+        return self._target is not None
 
+    @property
+    def parent(self) -> "Recipe":
+        assert self._parent, "Recipe has no parent."
+        return self._parent
+
+    @parent.setter
+    def parent(self, recipe: "Recipe"):
+        self._parent = recipe
+        self._parent.children.append(self)
+
+    @property
     def callsign(self) -> str:
-        return self.fmt.callsign(self)
+        if not self._callsign:
+            return self.sigil()
+        return self._callsign
+
+    @callsign.setter
+    def callsign(self, sign: str):
+        self._callsign = sign
+
+    def has_parent(self):
+        return self._parent is not None
+
+    def sigil(self) -> str:
+        return self.fmt.sigil(self)
 
     def log(self, event_name: str, data: Any = None):
         bus = EventBus.get()
@@ -436,12 +470,20 @@ class Recipe:
         if not self.has_components():
             return timedelta.max
         else:
-            return min(
-                max(c.age(ref), c.components_age(ref)) for c in self.components()
-            )
+            return min(max(c.age(ref), c.inputs_age(ref)) for c in self.components())
+
+    def dependencies_age(self, ref: datetime) -> timedelta:
+        if not self.has_components():
+            return timedelta.max
+        else:
+            return min(max(dep.age(ref), dep.inputs_age(ref)) for dep in self.deps)
 
     def inputs_age(self, ref: datetime) -> timedelta:
-        return min(self.static_files_age(ref), self.components_age(ref))
+        return min(
+            self.static_files_age(ref),
+            self.components_age(ref),
+            self.dependencies_age(ref),
+        )
 
     def components_results(self) -> tuple[list[Any], dict[str, Any]]:
         results = [c.result() for c in self.component_list]
@@ -492,14 +534,16 @@ class Recipe:
         self.log(Events.CLEAN, self.target)
 
     async def clean_components(self, recursive=False):
+        recipes = [*self.components(), *self.deps]
+
         if recursive:
-            return await asyncio.gather(
-                *[c.clean() for c in self.components()],
-                *[c.clean_components() for c in self.components()],
+            results = await asyncio.gather(
+                *[c.clean() for c in recipes],
+                *[c.clean_components(recursive=True) for c in recipes],
             )
         else:
             results = await asyncio.gather(
-                *(c.clean() for c in self.components()), return_exceptions=True
+                *(c.clean() for c in recipes), return_exceptions=True
             )
         exceptions = [e for e in results if isinstance(e, Exception)]
         if exceptions:
@@ -508,9 +552,11 @@ class Recipe:
             )
 
     async def make_components(self) -> tuple[list[Any], dict[str, Any]]:
+        recipes = [*self.components(), *self.deps]
+
         if self.sync:
             results = []
-            for c in self.components():
+            for c in recipes:
                 try:
                     results.append(await c())
 
@@ -521,7 +567,7 @@ class Recipe:
 
         else:
             results = await asyncio.gather(
-                *(c() for c in self.components()), return_exceptions=True
+                *(c() for c in recipes), return_exceptions=True
             )
             exceptions = [e for e in results if isinstance(e, Exception)]
             if exceptions:
@@ -545,9 +591,6 @@ class Recipe:
             return self.result()
         except ValueError:
             return other
-
-    def has_target(self):
-        return self._target is not None
 
     def rtarget(self):
         try:

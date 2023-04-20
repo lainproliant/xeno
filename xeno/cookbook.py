@@ -74,25 +74,15 @@ def recipe(
                     )
 
                 scanner = Recipe.scan(args, kwargs)
-                target_components = [
-                    c for c in scanner.components() if c.has_target()
-                ]
                 result = f(
                     *scanner.args(Recipe.PassMode.NORMAL),
                     **scanner.kwargs(Recipe.PassMode.NORMAL),
                 )
 
-                if truename == 'tests':
-                    import pdb
-                    pdb.set_trace()
-
                 if is_iterable(result):
-                    recipes = [*result]
-                    for recipe in recipes:
-                        recipe.component_list.extend(target_components)
-
                     result = Recipe(
                         [*result],
+                        deps=scanner.components(),
                         fmt=fmt or Recipe.Format(),
                         keep=keep,
                         memoize=memoize,
@@ -101,8 +91,8 @@ def recipe(
                     )
                 else:
                     result = cast(Recipe, result)
-                    result.component_list.extend(target_components)
 
+                    result.deps.extend(scanner.components())
                     result.fmt = fmt or result.fmt
                     result.keep = keep
                     result.memoize = memoize
