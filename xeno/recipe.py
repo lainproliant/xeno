@@ -69,11 +69,13 @@ class CompositeError(Exception):
 # --------------------------------------------------------------------
 ListedComponents = Iterable["Recipe"]
 MappedComponents = dict[str, "Recipe" | Iterable["Recipe"]]
+FormatF = Callable[["Recipe"], str]
 
 
 # --------------------------------------------------------------------
 class Recipe:
     DEFAULT_TARGET_PARAM = "target"
+    SIGIL_DELIMITER = ":"
 
     active: set["Recipe"] = set()
 
@@ -92,14 +94,9 @@ class Recipe:
                     target="→ ", start="⚙", ok="✓", fail="✗", warning="⚠"
                 )
             else:
-                self.SYMBOLS = self.Symbols(
+                self.symbols = self.Symbols(
                     target="->", start="(*)", ok=":)", fail=":(", warning="/!\\"
                 )
-
-        def callsign(self, recipe: "Recipe") -> str:
-            if recipe.has_target():
-                return f"{recipe.name}:{recipe.rtarget()}"
-            return recipe.name
 
         def clean(self, recipe: "Recipe") -> str:
             sb: list[str | Path] = []
@@ -116,11 +113,25 @@ class Recipe:
 
         def sigil(self, recipe: "Recipe") -> str:
             if recipe.has_target():
-                return f"{recipe.name}{self.symbols.target}{recipe.rtarget()}"
+                return f"{recipe.name}{Recipe.SIGIL_DELIMITER}{recipe.rtarget()}"
             return recipe.name
 
         def start(self, recipe: "Recipe") -> str:
             return f"{self.symbols.start} start"
+
+    class FormatOverride(Format):
+        def __init__(self, fmt: "Recipe.Format", **overrides):
+            self.fmt = fmt
+            for key in overrides.keys():
+                if not hasattr(fmt, key):
+                    raise ValueError(key)
+            self.overrides = overrides
+
+        def __getattribute__(self, name):
+            if name in self.overrides:
+                return self.overrides[name]
+            else:
+                return self.fmt.__getattribute__(name)
 
     class PassMode(Enum):
         NORMAL = 0
@@ -337,6 +348,11 @@ class Recipe:
         cls, recipes: Iterable["Recipe"], visited: Optional[set["Recipe"]] = None
     ) -> Generator["Recipe", None, None]:
         visited = visited or set()
+        for recipe in recipes:
+            if recipe not in visited:
+                visited.add(recipe)
+                yield recipe
+            yield from cls.flat(recipe.children, visited)
 
     def __init__(
         self,
@@ -351,6 +367,7 @@ class Recipe:
         name="(nameless)",
         parent: Optional["Recipe"] = None,
         setup: Optional["Recipe"] = None,
+        sigil: Optional[FormatF] = None,
         static_files: Iterable[PathSpec] = [],
         sync=False,
         target: Optional[PathSpec] = None,
@@ -358,21 +375,26 @@ class Recipe:
         self.id = uuid.uuid4()
         self.component_list = component_list
         self.component_map = component_map
-        self.children: list["Recipe"] = []
+
+        self._children: list["Recipe"] = []
+        self._own_deps = [*deps]
         self._parent: Optional["Recipe"] = None
-        self._callsign = ""
 
         self.as_user = as_user
-        self.deps = [*deps]
         self.fmt = fmt
         self.keep = keep
         self.memoize = memoize
         self.name = name
-        self.parent = parent
         self.setup = setup
         self.static_files = [Path(s) for s in static_files if s != target]
         self.sync = sync
         self._target = None if target is None else Path(target)
+
+        if parent:
+            self.parent = parent
+
+        if sigil:
+            self.fmt = Recipe.FormatOverride(self.fmt, sigil=sigil)
 
         self.lock = asyncio.Lock()
         self.saved_result = None
@@ -400,7 +422,11 @@ class Recipe:
     @parent.setter
     def parent(self, recipe: "Recipe"):
         self._parent = recipe
-        self._parent.children.append(self)
+        self._parent._children.append(self)
+
+    @property
+    def children(self) -> Generator["Recipe", None, None]:
+        yield from self._children
 
     @property
     def callsign(self) -> str:
@@ -472,11 +498,24 @@ class Recipe:
         else:
             return min(max(c.age(ref), c.inputs_age(ref)) for c in self.components())
 
+    def _collect_deps(self) -> Generator["Recipe", None, None]:
+        yield from self._own_deps
+        if self.has_parent():
+            yield from self.parent.dependencies()
+
+    def add_deps(self, deps: Iterable["Recipe"]):
+        self._own_deps.extend(deps)
+
+    def dependencies(self) -> Generator["Recipe", None, None]:
+        yield from Recipe.flat(self._collect_deps())
+
     def dependencies_age(self, ref: datetime) -> timedelta:
         if not self.has_components():
             return timedelta.max
         else:
-            return min(max(dep.age(ref), dep.inputs_age(ref)) for dep in self.deps)
+            return min(
+                max(dep.age(ref), dep.inputs_age(ref)) for dep in self.dependencies()
+            )
 
     def inputs_age(self, ref: datetime) -> timedelta:
         return min(
@@ -534,7 +573,7 @@ class Recipe:
         self.log(Events.CLEAN, self.target)
 
     async def clean_components(self, recursive=False):
-        recipes = [*self.components(), *self.deps]
+        recipes = [*self.components(), *self._own_deps]
 
         if recursive:
             results = await asyncio.gather(
@@ -552,7 +591,7 @@ class Recipe:
             )
 
     async def make_components(self) -> tuple[list[Any], dict[str, Any]]:
-        recipes = [*self.components(), *self.deps]
+        recipes = [*self.components(), *self.dependencies()]
 
         if self.sync:
             results = []

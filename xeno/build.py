@@ -11,6 +11,7 @@ import asyncio
 import io
 import sys
 from argparse import ArgumentParser
+from collections import defaultdict
 from functools import partial
 from typing import Any, Callable, Generator, Iterable, Optional, cast
 
@@ -49,6 +50,7 @@ class Config:
         self.debug = False
         self.force_color = False
         self.tasks: list[str] = []
+        self.targets: list[str] = []
         self.max_shells: Optional[int] = None
 
     def _argparser(self):
@@ -173,6 +175,17 @@ class Engine:
 
         return tasks
 
+    async def addressable_task_map(self) -> dict[str, Recipe]:
+        all_tasks = [*Recipe.flat(await self.tasks())]
+        callsign_counts: dict[str, int] = defaultdict(lambda: 0)
+        for task in all_tasks:
+            callsign_counts[task.callsign] += 1
+        duplicate_callsigns = [k for k, v in callsign_counts.items() if v > 1]
+        task_map = {t.callsign: t for t in all_tasks}
+        for callsign in duplicate_callsigns:
+            del task_map[callsign]
+        return task_map
+
     def default_task(self) -> Optional[str]:
         results = [
             k
@@ -241,10 +254,9 @@ class Engine:
 
         return wrapper
 
-    async def _resolve_tasks(self, config: Config) -> list[Task]:
+    async def _resolve_tasks(self, config: Config) -> list[Recipe]:
+        task_map = await self.addressable_task_map()
         task_names = config.targets
-        all_tasks = Task.flat(await self.tasks())
-        task_map = {t.name: t for t in all_tasks}
 
         if not task_names:
             default_task = self.default_task()
@@ -258,7 +270,7 @@ class Engine:
         return tasks
 
     async def _make_tasks(self, config, tasks):
-        self.scan.scan_params(*[task.recipe for task in tasks])
+        self.scan.scan_params(*tasks)
         while self.scan.has_recipes():
             await self.scan.gather_all()
 
@@ -269,11 +281,11 @@ class Engine:
     async def _clean_tasks(self, config, tasks):
         match config.cleanup_mode:
             case Config.CleanupMode.SHALLOW:
-                return await asyncio.gather(*[task.recipe.clean() for task in tasks])
+                return await asyncio.gather(*[task.clean() for task in tasks])
             case Config.CleanupMode.RECURSIVE:
                 return await asyncio.gather(
-                    *[task.recipe.clean() for task in tasks],
-                    *[task.recipe.clean_components(recursive=True) for task in tasks],
+                    *[task.clean() for task in tasks],
+                    *[task.clean_components(recursive=True) for task in tasks],
                 )
             case _:
                 raise ValueError("Config.cleanup_mode not specified.")
@@ -284,8 +296,13 @@ class Engine:
             print(task.name)
         return tasks
 
-    async def _list_task_tree(self):
-        tasks = sorted(Task.flat(await self.tasks()), key=lambda t: t.name)
+    async def _list_task_tree(self, indent=0):
+        tasks = await self.tasks()
+        for task in tasks:
+            if indent > 0:
+                print("  " * indent)
+
+        tasks = sorted(Recipe.flat(await self.tasks()), key=lambda t: t.name)
         for task in tasks:
             print(task.name)
         return tasks
@@ -350,7 +367,10 @@ class DefaultEngineHook:
         bkt = partial(color, fg="white", render="bold")
         sb = io.StringIO()
         sb.write(bkt("["))
-        sb.write(color(event.context.fmt.sigil(event.context), **kwargs))
+        sigil = event.context.sigil().replace(
+            Recipe.SIGIL_DELIMITER, event.context.fmt.symbols.target
+        )
+        sb.write(color(sigil, **kwargs))
         sb.write(bkt("]"))
         sb.write(" ")
         return sb.getvalue()

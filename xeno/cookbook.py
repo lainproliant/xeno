@@ -92,7 +92,7 @@ def recipe(
                 else:
                     result = cast(Recipe, result)
 
-                    result.deps.extend(scanner.components())
+                    result.add_deps(scanner.components())
                     result.fmt = fmt or result.fmt
                     result.keep = keep
                     result.memoize = memoize
