@@ -274,9 +274,6 @@ class Engine:
 
         tasks = [task_map[k] for k in task_names]
 
-        import pdb
-        pdb.set_trace()
-
         return tasks
 
     async def _make_tasks(self, config, tasks):
