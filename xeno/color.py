@@ -6,14 +6,17 @@
 #
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
+import io
 import os
 import sys
+from functools import partial
 from typing import List, Optional
 
 # --------------------------------------------------------------------
 _ansi_enabled = (
     "NO_COLOR" not in os.environ and sys.stdout.isatty()
 ) or "FORCE_COLOR" in os.environ
+
 
 # --------------------------------------------------------------------
 def disable():
@@ -44,6 +47,7 @@ RENDER_MODES = (
 
 # --------------------------------------------------------------------
 ANSI_ESC = "\033["
+
 
 # --------------------------------------------------------------------
 def seq(code) -> str:
@@ -78,6 +82,7 @@ def hide_cursor():
 # --------------------------------------------------------------------
 RESET = attr(0)
 
+
 # --------------------------------------------------------------------
 def style(
     fg: Optional[str] = None, bg: Optional[str] = None, render: Optional[str] = None
@@ -106,3 +111,17 @@ def color(
         before = style(fg, bg, render)
         return before + "".join(str(obj) for obj in content) + RESET + after
     return "".join(str(obj) for obj in content)
+
+
+# --------------------------------------------------------------------
+class TextDecorator:
+    def __init__(self):
+        pass
+
+    def embrace(self, text, begin="[", end="]", **kwargs):
+        brace_color = partial(color, fg="white", render="bold")
+        sb = io.StringIO()
+        sb.write(brace_color(begin))
+        sb.write(color(text, **kwargs))
+        sb.write(brace_color(end))
+        return sb.getvalue()

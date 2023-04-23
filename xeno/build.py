@@ -278,11 +278,19 @@ class Engine:
 
     async def _make_tasks(self, config, tasks):
         self.scan.scan_params(*tasks)
-        while self.scan.has_recipes():
-            await self.scan.gather_all()
+
+        try:
+            while self.scan.has_recipes():
+                await self.scan.gather_all()
+
+        except BuildError as e:
+            print(str(e))
+            print('FAIL')
+            return 1
 
         args = self.scan.args(Recipe.PassMode.RESULTS)
         self.scan.clear()
+        print('OK')
         return args
 
     async def _clean_tasks(self, config, tasks):
@@ -360,10 +368,8 @@ class Engine:
                 for hook in self.bus_hooks:
                     hook(self, bus)
                 return asyncio.run(self._build_loop(bus, *argv))
-            print("OK")
 
         except BuildError as e:
-            print("FAIL")
             if raise_errors:
                 raise e
 
