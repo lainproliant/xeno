@@ -7,11 +7,11 @@
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
 
-import sys
 import asyncio
 import itertools
+import sys
 from datetime import datetime, timedelta
-from xeno.events import EventBus
+from typing import Iterable, Optional
 
 from xeno.color import color
 
@@ -29,24 +29,41 @@ DEFAULT_SHAPE = [
 
 class Spinner:
     def __init__(self, message: str, interval: float = 0.05, delay: float = 0.25):
-        shape_array = []
-
-        for shape in DEFAULT_SHAPE:
-            shape_array.append(
-                "".join(
-                    [shape[0], color(shape[1:-1], fg="red", render="dim"), shape[-1]]
-                )
-            )
-
         self.message = message
-        self.cycle = itertools.cycle(shape_array)
+        self.colorized = False
+        self.cycle: Optional[Iterable[str]] = None
         self.interval = interval
         self.delay = delay
         self.start = datetime.now()
 
+    def _setup_cycle(self):
+        shape_array = []
+
+        if self.colorized:
+            for shape in DEFAULT_SHAPE:
+                shape_array.append(
+                    "".join(
+                        [
+                            shape[0],
+                            color(shape[1:-1], fg="red", render="dim"),
+                            shape[-1],
+                        ]
+                    )
+                )
+        else:
+            for shape in DEFAULT_SHAPE:
+                shape_array.extend(DEFAULT_SHAPE)
+
+        self.cycle = itertools.cycle(shape_array)
+
     async def spin(self) -> int:
         if not sys.stdout.isatty():
             return 0
+
+        if not self.cycle:
+            self._setup_cycle()
+
+        assert self.cycle is not None
 
         erase_chars = 0
         if datetime.now() - self.start > timedelta(seconds=self.delay):
