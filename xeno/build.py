@@ -401,12 +401,13 @@ class Engine:
 
         try:
             Shell.set_max_jobs(config.jobs)
-            tasks = await self._resolve_tasks(config)
 
             match config.mode:
                 case Config.Mode.BUILD:
+                    tasks = await self._resolve_tasks(config)
                     return await self._make_tasks(config, tasks)
                 case Config.Mode.CLEAN:
+                    tasks = await self._resolve_tasks(config)
                     return await self._clean_tasks(config, tasks)
                 case Config.Mode.HELP:
                     return await self._print_help(config, await self.tasks())
