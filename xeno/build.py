@@ -19,6 +19,7 @@ from xeno.attributes import MethodAttributes
 from xeno.color import TextDecorator
 from xeno.color import disable as disable_color
 from xeno.color import enable as enable_color
+from xeno.color import is_enabled as is_color_enabled
 from xeno.cookbook import recipe as base_recipe
 from xeno.decorators import named
 from xeno.events import Event, EventBus
@@ -323,15 +324,16 @@ class Engine:
             while self.scan.has_recipes():
                 await self.scan.gather_all()
 
+            args = self.scan.args(Recipe.PassMode.RESULTS)
+            self.scan.clear()
+            self.txt("OK", fg="green", render="bold")
+            return args
+
         except BuildError as e:
             self.txt.embrace("ERROR", fg="red", render="bold")
             self.txt(str(e))
             self.txt("FAIL", fg="red", render="bold")
-
-        args = self.scan.args(Recipe.PassMode.RESULTS)
-        self.scan.clear()
-        self.txt("OK", fg="green", render="bold")
-        return args
+            return None
 
     async def _clean_tasks(self, config, tasks):
         match config.cleanup_mode:
@@ -508,6 +510,7 @@ class DefaultEngineHook:
 
     def __call__(self, config: Config, engine: Engine, bus: EventBus):
         self.txt = engine.txt
+        self.spinner.colorized = is_color_enabled()
         bus.subscribe(Events.CLEAN, self.on_clean)
         bus.subscribe(Events.ERROR, self.on_error)
         bus.subscribe(Events.FAIL, self.on_fail)

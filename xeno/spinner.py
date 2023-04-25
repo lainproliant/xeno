@@ -13,7 +13,7 @@ import sys
 from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
-from xeno.color import color
+from xeno.color import color, is_enabled as is_color_enabled
 
 DEFAULT_SHAPE = [
     "[=   ]",
@@ -30,7 +30,7 @@ DEFAULT_SHAPE = [
 class Spinner:
     def __init__(self, message: str, interval: float = 0.05, delay: float = 0.25):
         self.message = message
-        self.colorized = False
+        self.colorized = is_color_enabled
         self.cycle: Optional[Iterable[str]] = None
         self.interval = interval
         self.delay = delay
@@ -45,7 +45,7 @@ class Spinner:
                     "".join(
                         [
                             shape[0],
-                            color(shape[1:-1], fg="red", render="dim"),
+                            color(shape[1:-1], fg="yellow"),
                             shape[-1],
                         ]
                     )

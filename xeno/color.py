@@ -31,6 +31,12 @@ def enable():
 
 
 # --------------------------------------------------------------------
+def is_enabled():
+    global _ansi_enabled
+    return _ansi_enabled
+
+
+# --------------------------------------------------------------------
 COLORS = ("black", "red", "green", "yellow", "blue", "magenta", "cyan", "white")
 RENDER_MODES = (
     "none",
