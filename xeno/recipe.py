@@ -377,6 +377,7 @@ class Recipe:
         *,
         as_user: Optional[str] = None,
         deps: Iterable["Recipe"] = [],
+        docs: Optional[str] = None,
         fmt: Format = Format(),
         keep=False,
         memoize=False,
@@ -399,6 +400,7 @@ class Recipe:
         self._target = None if target is None else Path(target)
 
         self.as_user = as_user
+        self.docs = docs
         self.fmt = fmt
         self.keep = keep
         self.memoize = memoize
@@ -694,9 +696,9 @@ class Recipe:
 
     async def _resolve(self):
         await self.make_dependencies()
-        await self.make_components()
 
         self.log(Events.START)
+        await self.make_components()
         result = await self.make()
 
         if is_iterable(result):
@@ -764,6 +766,7 @@ class Lambda(Recipe):
         f: Callable,
         lambda_args: list[Any],
         lambda_kwargs: dict[str, Any],
+        docs: Optional[str] = None,
         pass_mode=Recipe.PassMode.RESULTS,
         target_param=Recipe.DEFAULT_TARGET_PARAM,
         **kwargs,
@@ -781,6 +784,7 @@ class Lambda(Recipe):
             scanner.component_map(),
             static_files=scanner.paths(),
             target=target,
+            docs=docs or f.__doc__,
             **kwargs,
         )
         self.f = f

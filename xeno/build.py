@@ -8,34 +8,34 @@
 # --------------------------------------------------------------------
 
 import asyncio
-import io
+import multiprocessing
 import sys
-from argparse import ArgumentParser
+from argparse import ArgumentParser, HelpFormatter
 from collections import defaultdict
-from functools import partial
 from typing import Any, Callable, Iterable, Optional, cast
 
 from xeno.async_injector import AsyncInjector
 from xeno.attributes import MethodAttributes
-from xeno.color import color
+from xeno.color import TextDecorator
 from xeno.cookbook import recipe as base_recipe
 from xeno.decorators import named
 from xeno.events import Event, EventBus
 from xeno.recipe import BuildError, Events, Recipe
-from xeno.shell import Environment
+from xeno.shell import Environment, Shell
 from xeno.spinner import Spinner
 
 # --------------------------------------------------------------------
 EngineHook = Callable[["Engine", EventBus], None]
 
-
 # --------------------------------------------------------------------
 class Config:
     class Mode:
         BUILD = "build"
-        REBUILD = "rebuild"
         CLEAN = "clean"
+        HELP = "help"
         LIST = "list"
+        LIST_ALL = "list_all"
+        REBUILD = "rebuild"
         TREE = "tree"
 
     class CleanupMode:
@@ -43,26 +43,46 @@ class Config:
         SHALLOW = "shallow"
         RECURSIVE = "recursive"
 
-    def __init__(self, name):
-        self.name = name
-        self.mode = self.Mode.BUILD
+    class SortingHelpFormatter(HelpFormatter):
+        def add_arguments(self, actions):
+            actions = sorted(actions, key=lambda a: a.option_strings)
+            super().add_arguments(actions)
+
+    def __init__(self):
         self.cleanup_mode = self.CleanupMode.NONE
         self.debug = False
-        self.force_color = False
-        self.tasks: list[str] = []
+        self.color = "auto"
+        self.jobs = multiprocessing.cpu_count()
+        self.mode = self.Mode.BUILD
         self.targets: list[str] = []
-        self.max_shells: Optional[int] = None
+        self.tasks: list[str] = []
+        self.verbose = 0
 
     def _argparser(self):
-        parser = ArgumentParser(description=self.name, add_help=True)
-        parser.add_argument("targets", nargs="*")
+        parser = ArgumentParser(
+            add_help=False,
+            formatter_class=Config.SortingHelpFormatter,
+        )
+        parser.add_argument(
+            "targets",
+            nargs="*",
+            help="Top-level task targets or addressable recipes to build.",
+        )
+        parser.add_argument(
+            "--help",
+            "-h",
+            dest="mode",
+            action="store_const",
+            const=self.Mode.HELP,
+            help="Show this help text.",
+        )
         parser.add_argument(
             "--clean",
             "-c",
             dest="cleanup_mode",
             action="store_const",
             const=self.CleanupMode.RECURSIVE,
-            help="Clean the specified targets and all of their inputs.",
+            help="Clean the specified or default targets and their components.",
         )
         parser.add_argument(
             "--cut",
@@ -70,7 +90,7 @@ class Config:
             dest="cleanup_mode",
             action="store_const",
             const=self.CleanupMode.SHALLOW,
-            help="Clean just the specified target leaving inputs intact.",
+            help="Clean the specified or default targets only.",
         )
         parser.add_argument(
             "--rebuild",
@@ -78,13 +98,13 @@ class Config:
             dest="mode",
             action="store_const",
             const=self.Mode.REBUILD,
-            help="Clean the specified targets, then rebuild them.",
+            help="Clean and then rebuild the specified or default targets and their components.",
         )
         parser.add_argument(
             "--verbose",
             "-v",
             action="count",
-            help="Print stdout (-v) and/or stderr (-vv) for live running commands.",
+            help="Print additional diagnostic or help info.",
         )
         parser.add_argument(
             "--list",
@@ -92,34 +112,42 @@ class Config:
             dest="mode",
             action="store_const",
             const=self.Mode.LIST,
-            help="List all defined targets.",
+            help="List all top-level tasks targets.",
         )
         parser.add_argument(
-            "--list-tree",
+            "--list-all",
             "-L",
             dest="mode",
             action="store_const",
+            const=self.Mode.LIST_ALL,
+            help="List all top-level task targets and their addressable components.",
+        )
+        parser.add_argument(
+            "--tree",
+            "-T",
+            dest="mode",
+            action="store_const",
             const=self.Mode.TREE,
-            help="List all defined targets and all subtargets.",
+            help="List all tasks and their components in a tree.",
         )
         parser.add_argument(
             "--debug",
             "-D",
             action="store_true",
-            help="Print stack traces and other diagnostic info.",
+            help="Enable debug and extra diagnostic info.",
         )
         parser.add_argument(
-            "--force-color",
-            action="store_true",
-            help="Force color output to non-tty.  Useful for IDEs.",
+            "--color",
+            choices=["yes", "no", "auto"],
+            default="auto",
+            help="Choose when to enable colorized output.",
         )
         parser.add_argument(
-            "--max",
-            "-m",
-            dest="max_shells",
+            "--jobs",
+            "-j",
+            dest="jobs",
             type=int,
-            default=None,
-            help="Set the max number of simultaneous live commands.",
+            help="Number of simultaneous shells, defaults to number of CPUs.",
         )
         parser.set_defaults(mode=self.Mode.BUILD)
         return parser
@@ -135,16 +163,19 @@ class Config:
 
 # --------------------------------------------------------------------
 class Engine:
+    TREE_SUB_ARROW = "⮡"
+
     class Attributes:
         TARGET = "xeno.build.task"
         DEFAULT = "xeno.build.default"
 
-    def __init__(self, name="Xeno v5 Build Engine"):
+    def __init__(self, name="Build Script"):
         self.name = name
         self.bus_hooks: list[EngineHook] = list()
         self.env = Environment.context()
         self.injector = AsyncInjector()
         self.scan = Recipe.Scanner()
+        self.txt = TextDecorator()
 
     def add_hook(self, hook: EngineHook):
         self.bus_hooks.append(hook)
@@ -240,6 +271,7 @@ class Engine:
                 base_recipe(
                     name,
                     dep=dep,
+                    docs=f.__doc__,
                     factory=factory,
                     keep=keep,
                     sync=sync,
@@ -284,13 +316,13 @@ class Engine:
                 await self.scan.gather_all()
 
         except BuildError as e:
-            print(str(e))
-            print('FAIL')
-            return 1
+            self.txt.embrace("ERROR", fg="red", render="bold")
+            self.txt(str(e))
+            self.txt("FAIL", fg="red", render="bold")
 
         args = self.scan.args(Recipe.PassMode.RESULTS)
         self.scan.clear()
-        print('OK')
+        self.txt("OK", fg="green", render="bold")
         return args
 
     async def _clean_tasks(self, config, tasks):
@@ -305,10 +337,23 @@ class Engine:
             case _:
                 raise ValueError("Config.cleanup_mode not specified.")
 
-    def _list_tasks(self, tasks: Iterable[Recipe]):
-        tasks = sorted(tasks, key=lambda t: t.name)
-        for task in tasks:
-            print(task.name)
+    async def _print_help(self, config: Config, tasks: Iterable[Recipe]):
+        parser = config._argparser()
+
+        self.txt(f"# {self.name}")
+        self.txt(parser.format_help(), render='dim')
+        self.txt('')
+        self.txt('# Target Tasks')
+        self._list_tasks(config, tasks)
+
+    def _list_tasks(self, config: Config, tasks: Iterable[Recipe]):
+        tasks = sorted(tasks, key=lambda t: t.callsign)
+        for t in tasks:
+            self.txt.write(t.callsign, fg='cyan')
+            if t.docs:
+                self.txt.write(f' {t.fmt.symbols.target} ')
+                self.txt.write(t.docs, render='dim')
+            self.txt('')
         return tasks
 
     def _list_task_tree(
@@ -321,22 +366,31 @@ class Engine:
         tasks = sorted((t for t in tasks if t not in visited), key=lambda t: t.callsign)
         new_visited = visited | set(tasks)
 
+        first_indent = True
         for task in tasks:
             if indent > 0:
-                print(f"{'  ' * indent} ⮡ {task.callsign}")
+                self.txt.write("  " * indent)
+                if first_indent:
+                    self.txt.write(f" {self.TREE_SUB_ARROW} ", fg="white", render="dim")
+                    first_indent = False
+                else:
+                    self.txt.write(f' {" " * len(self.TREE_SUB_ARROW)} ')
+
+                self.txt.print(task.callsign)
             else:
-                print(f"{task.callsign}")
+                self.txt.print(task.callsign, fg="cyan", render="bold")
 
             if task not in visited:
                 self._list_task_tree(task.children, indent + 1, new_visited)
 
         return 0
 
-    async def build_async(self, *argv) -> list[Any]:
+    async def build_async(self, config: Config) -> list[Any]:
         bus = EventBus.get()
+        max_jobs = Shell.max_jobs
 
         try:
-            config = Config("Xeno Build Engine v5").parse_args(*argv)
+            Shell.set_max_jobs(config.jobs)
             tasks = await self._resolve_tasks(config)
 
             match config.mode:
@@ -344,8 +398,13 @@ class Engine:
                     return await self._make_tasks(config, tasks)
                 case Config.Mode.CLEAN:
                     return await self._clean_tasks(config, tasks)
+                case Config.Mode.HELP:
+                    return await self._print_help(config, await self.tasks())
                 case Config.Mode.LIST:
-                    return self._list_tasks(await self.tasks())
+                    return self._list_tasks(config, await self.tasks())
+                case Config.Mode.LIST_ALL:
+                    return self._list_tasks(config, (await self.addressable_task_map()).values())
+
                 case Config.Mode.REBUILD:
                     await self._clean_tasks(config, tasks)
                     return await self._make_tasks(config, tasks)
@@ -355,19 +414,21 @@ class Engine:
                     raise RuntimeError("Unknown mode encountered.")
 
         finally:
+            Shell.set_max_jobs(max_jobs)
             bus.shutdown()
 
-    async def _build_loop(self, bus, *argv):
-        result, _ = await asyncio.gather(self.build_async(*argv), bus.run())
+    async def _build_loop(self, bus, config: Config):
+        result, _ = await asyncio.gather(self.build_async(config), bus.run())
         return result
 
     def build(self, *argv, raise_errors=True):
+        config = Config().parse_args(*argv)
         try:
             with EventBus.session():
                 bus = EventBus.get()
                 for hook in self.bus_hooks:
                     hook(self, bus)
-                return asyncio.run(self._build_loop(bus, *argv))
+                return asyncio.run(self._build_loop(bus, config))
 
         except BuildError as e:
             if raise_errors:
@@ -378,80 +439,56 @@ class Engine:
 class DefaultEngineHook:
     def __init__(self):
         self.spinner = Spinner("resolving")
-        self._clear_chars = 0
+        self.txt: Optional[TextDecorator] = None
 
-    def print(self, s):
-        sys.stdout.write("\r")
-        sys.stdout.write(" " * self._clear_chars)
-        sys.stdout.write("\r")
-        return print(s)
+    def embrace(self, *content, **kwargs):
+        assert self.txt
+        return self.txt.embrace(*content, **kwargs)
 
-    def sigil(self, event, **kwargs):
-        bkt = partial(color, fg="white", render="bold")
-        sb = io.StringIO()
-        sb.write(bkt("["))
-        sigil = event.context.sigil().replace(
+    def print(self, *content, **kwargs):
+        assert self.txt
+        return self.txt(*content, **kwargs)
+
+    def sigil(self, event):
+        return event.context.sigil().replace(
             Recipe.SIGIL_DELIMITER, event.context.fmt.symbols.target
         )
-        sb.write(color(sigil, **kwargs))
-        sb.write(bkt("]"))
-        sb.write(" ")
-        return sb.getvalue()
 
     async def on_frame(self, event):
+        assert self.txt
         self.spinner.message = f"resolving [{len(Recipe.active)}]"
-        self._clear_chars = await self.spinner.spin()
+        self.txt.wipe = await self.spinner.spin()
 
     def on_clean(self, event):
-        clr = partial(color, fg="white")
-        sb = io.StringIO()
-        sb.write(self.sigil(event, fg="green", render="bold"))
-        sb.write(clr(event.context.fmt.clean(event.context)))
-        self.print(sb.getvalue())
+        self.embrace(self.sigil(event), fg="green", render="bold")
+        self.print(event.context.fmt.clean(event.context))
 
     def on_error(self, event):
-        clr = partial(color, fg="red")
-        sb = io.StringIO()
-        sb.write(self.sigil(event, fg="red", render="bold"))
-        sb.write(clr(event.data))
-        self.print(sb.getvalue())
+        self.embrace(self.sigil(event), fg="red", render="bold")
+        self.print(event.data)
 
     def on_fail(self, event):
-        clr = partial(color, fg="white")
-        sb = io.StringIO()
-        sb.write(self.sigil(event, fg="red", render="bold"))
-        sb.write(clr(event.context.fmt.fail(event.context)))
-        self.print(sb.getvalue())
+        self.embrace(self.sigil(event), fg="white", bg="red", render="bold")
+        self.print(event.context.fmt.fail(event.context))
 
     def on_info(self, event: Event):
-        clr = partial(color, fg="white", render="dim")
-        sb = io.StringIO()
-        sb.write(self.sigil(event, fg="white", render="dim"))
-        sb.write(clr(event.data))
-        self.print(sb.getvalue())
+        self.embrace(self.sigil(event), fg="white", render="dim")
+        self.print(event.data, fg="white", render="dim")
 
     def on_start(self, event: Event):
-        clr = partial(color, fg="white")
-        sb = io.StringIO()
-        sb.write(self.sigil(event, fg="cyan", render="bold"))
-        sb.write(clr(event.context.fmt.start(event.context)))
-        self.print(sb.getvalue())
+        self.embrace(self.sigil(event), fg="cyan", render="bold")
+        self.print(event.context.fmt.start(event.context))
 
     def on_success(self, event: Event):
-        clr = partial(color, fg="white")
-        sb = io.StringIO()
-        sb.write(self.sigil(event, fg="green", render="bold"))
-        sb.write(clr(event.context.fmt.ok(event.context)))
-        self.print(sb.getvalue())
+        self.embrace(self.sigil(event), fg="green", render="bold")
+        self.print(event.context.fmt.ok(event.context))
 
     def on_warning(self, event: Event):
-        clr = partial(color, fg="white")
-        sb = io.StringIO()
-        sb.write(self.sigil(event, fg="yellow", render="bold"))
-        sb.write(clr(event.data))
-        self.print(sb.getvalue())
+        self.embrace(self.sigil(event), fg="yellow", render="bold")
+        self.print(event.data, fg="yellow", render="dim")
 
     def __call__(self, engine: Engine, bus: EventBus):
+        self.txt = engine.txt
         bus.subscribe(Events.CLEAN, self.on_clean)
         bus.subscribe(Events.ERROR, self.on_error)
         bus.subscribe(Events.FAIL, self.on_fail)

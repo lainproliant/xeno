@@ -8,11 +8,12 @@
 # --------------------------------------------------------------------
 
 import asyncio
+import multiprocessing
 import os
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Union, Iterable
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Union
 
 from xeno.utils import decode, is_iterable
 
@@ -79,6 +80,14 @@ def check(cmd: Union[str, Iterable[str]]):
 
 # --------------------------------------------------------------------
 class Shell:
+    max_jobs: int = 0
+    job_semaphore: asyncio.Semaphore = asyncio.Semaphore(max_jobs)
+
+    @classmethod
+    def set_max_jobs(cls, n: int):
+        cls.max_jobs = n
+        cls.job_semaphore = asyncio.Semaphore(cls.max_jobs)
+
     def __init__(self, env: EnvDict = dict(os.environ), cwd: Optional[PathSpec] = None):
         self._env = digest_env(env)
         self._cwd = Path(cwd) if cwd is not None else Path.cwd()
@@ -145,39 +154,40 @@ class Shell:
         check=False,
         **params,
     ) -> int:
-        rl_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
+        async with self.job_semaphore:
+            rl_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
 
-        def setup_rl_task(stream: asyncio.StreamReader, sink: LineSink):
-            rl_tasks[asyncio.Task(stream.readline())] = (stream, sink)
+            def setup_rl_task(stream: asyncio.StreamReader, sink: LineSink):
+                rl_tasks[asyncio.Task(stream.readline())] = (stream, sink)
 
-        cmd = self.interpolate(cmd, params)
-        proc = await self._create_proc(cmd)
-        assert proc.stdout is not None
-        assert proc.stderr is not None
-        if stdin:
-            assert proc.stdin
-            proc.stdin.write(stdin().encode("utf-8"))
-        if stdout:
-            setup_rl_task(proc.stdout, stdout)
-        if stderr:
-            setup_rl_task(proc.stderr, stderr)
+            cmd = self.interpolate(cmd, params)
+            proc = await self._create_proc(cmd)
+            assert proc.stdout is not None
+            assert proc.stderr is not None
+            if stdin:
+                assert proc.stdin
+                proc.stdin.write(stdin().encode("utf-8"))
+            if stdout:
+                setup_rl_task(proc.stdout, stdout)
+            if stderr:
+                setup_rl_task(proc.stderr, stderr)
 
-        while rl_tasks:
-            done, _ = await asyncio.wait(rl_tasks, return_when=asyncio.FIRST_COMPLETED)
+            while rl_tasks:
+                done, _ = await asyncio.wait(rl_tasks, return_when=asyncio.FIRST_COMPLETED)
 
-            for future in done:
-                stream, sink = rl_tasks.pop(future)
-                line = future.result()
-                if line:
-                    line = decode(line).rstrip()
-                    assert proc.stdin is not None
-                    sink(line, proc.stdin)
-                    setup_rl_task(stream, sink)
+                for future in done:
+                    stream, sink = rl_tasks.pop(future)
+                    line = future.result()
+                    if line:
+                        line = decode(line).rstrip()
+                        assert proc.stdin is not None
+                        sink(line, proc.stdin)
+                        setup_rl_task(stream, sink)
 
-        await proc.wait()
-        assert proc.returncode is not None, "proc.returncode is None"
-        assert not check or proc.returncode == 0, "Command failed."
-        return proc.returncode
+            await proc.wait()
+            assert proc.returncode is not None, "proc.returncode is None"
+            assert not check or proc.returncode == 0, "Command failed."
+            return proc.returncode
 
     def sync(
         self,

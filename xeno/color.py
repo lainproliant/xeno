@@ -115,13 +115,70 @@ def color(
 
 # --------------------------------------------------------------------
 class TextDecorator:
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        *,
+        fg: Optional[str] = None,
+        bg: Optional[str] = None,
+        render: Optional[str] = None,
+        outfile=sys.stdout
+    ):
+        self.fg = fg
+        self.bg = bg
+        self.render = render
+        self.outfile = outfile
+        self.wipe = 0
 
-    def embrace(self, text, begin="[", end="]", **kwargs):
-        brace_color = partial(color, fg="white", render="bold")
+    def embrace(
+        self,
+        text,
+        *,
+        begin="[",
+        end="]",
+        brace_fg="white",
+        brace_bg=None,
+        brace_render="bold",
+        **kwargs
+    ):
+        self._autowipe()
+        brace_color = partial(color, fg=brace_fg, bg=brace_bg, render=brace_render)
         sb = io.StringIO()
         sb.write(brace_color(begin))
         sb.write(color(text, **kwargs))
         sb.write(brace_color(end))
-        return sb.getvalue()
+        return self.outfile.write(sb.getvalue() + " ")
+
+    def write(self, text, **kwargs):
+        return self.outfile.write(color(text, **self._inject_kwargs(kwargs)))
+
+    def print(self, text, **kwargs):
+        self._autowipe()
+        n = self.write(text, **kwargs)
+        n += self.outfile.write("\n")
+        self.flush()
+        return n
+
+    def flush(self):
+        return self.outfile.flush()
+
+    def wipeline(self, n: int):
+        if n > 0:
+            self.outfile.write("\r")
+            self.outfile.write(" " * n)
+            self.outfile.write("\r")
+            self.flush()
+
+    def _inject_kwargs(self, kwargs):
+        return {
+            **kwargs,
+            "fg": self.fg or kwargs.get("fg", None),
+            "bg": self.bg or kwargs.get("bg", None),
+            "render": self.render or kwargs.get("render", None),
+        }
+
+    def _autowipe(self):
+        self.wipeline(self.wipe)
+        self.wipe = 0
+
+    def __call__(self, text, **kwargs):
+        return self.print(text, **kwargs)

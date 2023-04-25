@@ -41,6 +41,7 @@ def recipe(
     name_or_f: Optional[str | Callable] = None,
     *,
     dep: Optional[str | Iterable[str]] = None,
+    docs: Optional[str] = None,
     factory=False,
     fmt: Optional[Recipe.Format] = None,
     keep=False,
@@ -103,6 +104,7 @@ def recipe(
                 if is_iterable(result):
                     result = Recipe(
                         [*result],
+                        docs=docs,
                         fmt=fmt or Recipe.Format(),
                         keep=keep,
                         memoize=memoize,
@@ -112,6 +114,7 @@ def recipe(
                 else:
                     result = cast(Recipe, result)
 
+                    result.docs = docs
                     result.fmt = fmt or result.fmt
                     result.keep = keep
                     result.memoize = memoize
@@ -123,6 +126,7 @@ def recipe(
                     f,
                     [*args],
                     {**kwargs},
+                    docs=docs,
                     fmt=fmt or Recipe.Format(),
                     keep=keep,
                     memoize=memoize,
