@@ -59,12 +59,14 @@ class Config:
 
     def __init__(self):
         self.cleanup_mode = self.CleanupMode.NONE
-        self.debug = False
         self.color = "auto"
+        self.debug = False
         self.jobs = multiprocessing.cpu_count()
         self.mode = self.Mode.BUILD
+        self.quiet = False
         self.targets: list[str] = []
         self.tasks: list[str] = []
+        self.to_stdout = False
         self.verbose = 0
 
     def _argparser(self):
@@ -114,6 +116,18 @@ class Config:
             "-v",
             action="count",
             help="Print additional diagnostic or help info.",
+        )
+        parser.add_argument(
+            "--quiet",
+            "-q",
+            action="store_true",
+            help="Only print info/warning/error event contents to stderr, nothing else.",
+        )
+        parser.add_argument(
+            "--to-stdout",
+            "-s",
+            action="store_true",
+            help="Print info event contents to stdout, all else to stderr.",
         )
         parser.add_argument(
             "--list",
@@ -184,7 +198,7 @@ class Engine:
         self.env = Environment.context()
         self.injector = AsyncInjector()
         self.scan = Recipe.Scanner()
-        self.txt = TextDecorator()
+        self.txt = TextDecorator(outfile=sys.stderr)
 
     def add_hook(self, hook: EngineHook):
         self.bus_hooks.append(hook)
@@ -419,6 +433,7 @@ class Engine:
                     )
 
                 case Config.Mode.REBUILD:
+                    tasks = await self._resolve_tasks(config)
                     await self._clean_tasks(config, tasks)
                     return await self._make_tasks(config, tasks)
                 case Config.Mode.TREE:
@@ -462,6 +477,8 @@ class DefaultEngineHook:
     def __init__(self):
         self.spinner = Spinner("resolving")
         self.txt: Optional[TextDecorator] = None
+        self.quiet = False
+        self.to_stdout = False
 
     def embrace(self, *content, **kwargs):
         assert self.txt
@@ -477,41 +494,61 @@ class DefaultEngineHook:
         )
 
     async def on_frame(self, event):
+        if self.quiet:
+            return
         assert self.txt
         self.spinner.message = f"resolving [{len(Recipe.active)}]"
         self.txt.wipe = await self.spinner.spin()
 
     def on_clean(self, event):
+        if self.quiet:
+            return
         self.embrace(self.sigil(event), fg="green", render="bold")
         self.print(event.context.fmt.clean(event.context))
 
     def on_error(self, event):
-        self.embrace(self.sigil(event), fg="red", render="bold")
+        if not self.quiet:
+            self.embrace(self.sigil(event), fg="red", render="bold")
         self.print(event.data)
 
     def on_fail(self, event):
+        if self.quiet:
+            return
         self.embrace(self.sigil(event), fg="white", bg="red", render="bold")
         self.print(event.context.fmt.fail(event.context))
 
     def on_info(self, event: Event):
-        self.embrace(self.sigil(event), fg="white", render="dim")
-        self.print(event.data, fg="white", render="dim")
+        if not self.quiet and not self.to_stdout:
+            self.embrace(self.sigil(event), fg="white", render="dim")
+        if self.to_stdout:
+            print(event.data)
+        else:
+            self.print(event.data, fg="white", render="dim")
 
     def on_start(self, event: Event):
+        if self.quiet:
+            return
         self.embrace(self.sigil(event), fg="cyan", render="bold")
         self.print(event.context.fmt.start(event.context))
 
     def on_success(self, event: Event):
+        if self.quiet:
+            return
         self.embrace(self.sigil(event), fg="green", render="bold")
         self.print(event.context.fmt.ok(event.context))
 
     def on_warning(self, event: Event):
-        self.embrace(self.sigil(event), fg="yellow", render="bold")
-        self.print(event.data, fg="yellow", render="dim")
+        if not self.quiet:
+            self.embrace(self.sigil(event), fg="yellow", render="bold")
+            self.print(event.data, fg="yellow", render="dim")
+        else:
+            self.print(event.data)
 
     def __call__(self, config: Config, engine: Engine, bus: EventBus):
         self.txt = engine.txt
         self.spinner.colorized = is_color_enabled()
+        self.quiet = config.quiet
+        self.to_stdout = config.to_stdout
         bus.subscribe(Events.CLEAN, self.on_clean)
         bus.subscribe(Events.ERROR, self.on_error)
         bus.subscribe(Events.FAIL, self.on_fail)
