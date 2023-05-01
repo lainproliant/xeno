@@ -978,7 +978,7 @@ class XenoBuildTests(unittest.TestCase):
 
         @provide
         def file():
-            return Path("/proc/cpuinfo")
+            return Path("/etc/hosts")
 
         @task
         def print_file(file):
@@ -1034,9 +1034,12 @@ class XenoBuildTests(unittest.TestCase):
 
             @engine.task(keep=True)
             def output_dir(unique_name):
-                return sh("mkdir {target}", target=Path("/tmp") / unique_name)
+                return sh(
+                    "echo 'Making directory...' && mkdir {target}",
+                    target=Path("/tmp") / unique_name,
+                )
 
-            @engine.task(default=True)
+            @engine.task(default=True, dep="output_dir")
             def make_hello_file(output_dir):
                 return hello_file(output_dir.target / "hello.txt")
 
@@ -1044,7 +1047,7 @@ class XenoBuildTests(unittest.TestCase):
             def filenames():
                 return ["apples", "bananas", "oranges"]
 
-            @engine.task
+            @engine.task(dep="output_dir")
             def more_hello_files(filenames, output_dir):
                 return [hello_file(output_dir.target / name) for name in filenames]
 
@@ -1097,7 +1100,9 @@ class XenoBuildTests(unittest.TestCase):
             @engine.task
             def copy_file():
                 return sh(
-                    "cat {input} >> {target}", input=input_file, target=output_dir / "out.txt"
+                    "cat {input} >> {target}",
+                    input=input_file,
+                    target=output_dir / "out.txt",
                 )
 
             copy_file_recipe = cast(Recipe, engine.injector.require("copy_file"))

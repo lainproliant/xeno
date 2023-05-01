@@ -7,6 +7,7 @@
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
 
+import fnmatch
 import asyncio
 import multiprocessing
 import sys
@@ -48,9 +49,9 @@ class Config:
         RECURSIVE = "recursive"
 
     class ColorOptions:
-        YES = 'yes'
-        NO = 'no'
-        AUTO = 'auto'
+        YES = "yes"
+        NO = "no"
+        AUTO = "auto"
 
     class SortingHelpFormatter(HelpFormatter):
         def add_arguments(self, actions):
@@ -317,17 +318,23 @@ class Engine:
         return wrapper
 
     async def _resolve_tasks(self, config: Config) -> list[Recipe]:
-        task_map = await self.addressable_task_map()
-        task_names = config.targets
+        task_map: dict[str, Recipe] = await self.addressable_task_map()
+        targets = config.targets
 
-        if not task_names:
+        if not targets:
             default_task = self.default_task()
             if default_task is not None:
-                task_names = [default_task]
+                targets = [default_task]
             else:
                 raise ValueError("No task specified and no default task defined.")
 
-        tasks = [task_map[k] for k in task_names]
+        task_names: set[str] = set()
+        tasks = []
+        for target in targets:
+            for name in fnmatch.filter(task_map.keys(), target):
+                if name not in task_names:
+                    task_names.add(name)
+                    tasks.append(task_map[name])
 
         return tasks
 
@@ -345,9 +352,8 @@ class Engine:
 
         except BuildError as e:
             self.txt.embrace("ERROR", fg="red", render="bold")
-            self.txt(str(e))
             self.txt("FAIL", fg="red", render="bold")
-            return None
+            raise e
 
     async def _clean_tasks(self, config, tasks):
         match config.cleanup_mode:
@@ -549,14 +555,17 @@ class DefaultEngineHook:
         self.spinner.colorized = is_color_enabled()
         self.quiet = config.quiet
         self.to_stdout = config.to_stdout
-        bus.subscribe(Events.CLEAN, self.on_clean)
-        bus.subscribe(Events.ERROR, self.on_error)
-        bus.subscribe(Events.FAIL, self.on_fail)
-        bus.subscribe(Events.INFO, self.on_info)
-        bus.subscribe(Events.START, self.on_start)
-        bus.subscribe(Events.SUCCESS, self.on_success)
-        bus.subscribe(Events.WARNING, self.on_warning)
-        bus.subscribe(EventBus.FRAME, self.on_frame)
+        for event, listener in [
+            (Events.CLEAN, self.on_clean),
+            (Events.ERROR, self.on_error),
+            (Events.FAIL, self.on_fail),
+            (Events.INFO, self.on_info),
+            (Events.START, self.on_start),
+            (Events.SUCCESS, self.on_success),
+            (Events.WARNING, self.on_warning),
+            (EventBus.FRAME, self.on_frame),
+        ]:
+            bus.subscribe(event, listener)
 
 
 # --------------------------------------------------------------------

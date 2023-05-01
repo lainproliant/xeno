@@ -135,8 +135,11 @@ class Recipe:
                     raise ValueError(key)
             self.overrides = overrides
 
+        def add_override(self, key: str, value: Any):
+            self.overrides[key] = value
+
         def __getattribute__(self, name):
-            if name in ("overrides", "fmt"):
+            if name in ("overrides", "fmt", "add_override"):
                 return super().__getattribute__(name)
             if name in self.overrides:
                 return self.overrides[name]
@@ -197,9 +200,6 @@ class Recipe:
             results = await asyncio.gather(
                 *[v() if isinstance(v, Recipe) else async_vwrap(v) for v in self._args]
             )
-            for n in self._arg_offsets:
-                if isinstance(results[n], Recipe):
-                    results[n].configure(self._args[n])
             self.scan_params(*results)
 
         def bind(self, f: Callable, mode: "Recipe.PassMode"):
@@ -219,9 +219,6 @@ class Recipe:
                 ]
             )
             results = {k: v for k, v in result_tuples}
-            for k in self._kwarg_keys:
-                if isinstance(results[k], Recipe):
-                    results[k].configure(self._kwargs[k])
             self.scan_params(**results)
 
         def gather_all(self):
@@ -707,10 +704,9 @@ class Recipe:
             while scanner.has_recipes():
                 await scanner.gather_all()
             result = scanner.args(pass_mode=Recipe.PassMode.RESULTS)
-        else:
-            if isinstance(result, Recipe):
-                result._configure(self)
-                result = await result()
+
+        elif isinstance(result, Recipe):
+            result = await result()
 
         if self.has_target():
             assert isinstance(
