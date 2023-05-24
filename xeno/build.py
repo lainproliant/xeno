@@ -258,6 +258,9 @@ class Engine:
     def recipe(self, *args, **kwargs):
         return base_recipe(*args, **kwargs)
 
+    def factory(self, *args, **kwargs):
+        return base_recipe(*args, **kwargs, factory=True)
+
     def task(
         self,
         name_or_f: Optional[str | Callable] = None,
@@ -573,6 +576,7 @@ engine = Engine()
 engine.add_hook(DefaultEngineHook())
 provide = engine.provide
 recipe = engine.recipe
+factory = engine.factory
 task = engine.task
 
 

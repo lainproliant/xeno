@@ -48,7 +48,6 @@ def recipe(
     memoize=False,
     sigil: Optional[FormatF] = None,
     sync=False,
-    target: Optional[FormatF] = None,
 ):
     """
     Decorator for a function that defines a recipe template.
@@ -111,7 +110,6 @@ def recipe(
                         memoize=memoize,
                         name=truename,
                         sync=sync,
-                        target=target
                     )
                 else:
                     result = cast(Recipe, result)
