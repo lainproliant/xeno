@@ -21,7 +21,7 @@ class OutputCapture:
         for k, v in kwargs.items():
             if k not in OutputCapture.VALID_TARGETS:
                 raise ValueError(
-                    f"Capture targets be one or more of {OutputCapture.VALID_TARGETS}."
+                    f"Capture targets must be one or more of {OutputCapture.VALID_TARGETS}."
                 )
             if v:
                 self.targets.add(k)
