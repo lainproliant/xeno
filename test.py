@@ -881,20 +881,31 @@ class CommonXenoTests(unittest.TestCase):
         injector = self.make_injector()
 
         @injector.provide
-        def generated_sequence():
+        def sequence_A():
             for i in range(10):
                 yield i
 
-        value = injector.require("generated_sequence")
+        @injector.provide
+        def sequence_B(sequence_A):
+            yield from reversed(list(sequence_A))
+
+        value = injector.require("sequence_A")
         self.assertTrue(isinstance(value, types.GeneratorType))
         value = [*value]
         self.assertEqual(value, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
 
         # We should be given a new generator this time.
-        value = injector.require("generated_sequence")
+        value = injector.require("sequence_A")
         self.assertTrue(isinstance(value, types.GeneratorType))
         value = [*value]
         self.assertEqual(value, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+
+        # The `sequence_B` provider should get its own `sequence_A`
+        # generator, too.
+        value = injector.require("sequence_B")
+        self.assertTrue(isinstance(value, types.GeneratorType))
+        value = [*value]
+        self.assertEqual(value, [9, 8, 7, 6, 5, 4, 3, 2, 1, 0])
 
 
 # --------------------------------------------------------------------
