@@ -7,10 +7,11 @@
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
 
-import fnmatch
 import asyncio
+import fnmatch
 import multiprocessing
 import sys
+import traceback
 from argparse import ArgumentParser, HelpFormatter
 from collections import defaultdict
 from typing import Any, Callable, Iterable, Optional, cast
@@ -47,6 +48,7 @@ class Config:
         NONE = "none"
         SHALLOW = "shallow"
         RECURSIVE = "recursive"
+        RECURSIVE_WITH_DEPS = "recursive_with_deps"
 
     class ColorOptions:
         YES = "yes"
@@ -94,7 +96,15 @@ class Config:
             dest="cleanup_mode",
             action="store_const",
             const=self.CleanupMode.RECURSIVE,
-            help="Clean the specified or default targets and their components.",
+            help="Clean the specified or default targets and all their components.",
+        )
+        parser.add_argument(
+            "--full-clean",
+            "-C",
+            dest="cleanup_mode",
+            action="store_const",
+            const=self.CleanupMode.RECURSIVE_WITH_DEPS,
+            help="Clean the specified or default targets and all their components and dependencies.",
         )
         parser.add_argument(
             "--cut",
@@ -367,6 +377,12 @@ class Engine:
                     *[task.clean() for task in tasks],
                     *[task.clean_components(recursive=True) for task in tasks],
                 )
+            case Config.CleanupMode.RECURSIVE_WITH_DEPS:
+                return await asyncio.gather(
+                    *[task.clean() for task in tasks],
+                    *[task.clean_components(recursive=True) for task in tasks],
+                    *[task.clean_deps() for task in tasks],
+                )
             case _:
                 raise ValueError("Config.cleanup_mode not specified.")
 
@@ -458,7 +474,7 @@ class Engine:
         result, _ = await asyncio.gather(self.build_async(config), bus.run())
         return result
 
-    def build(self, *argv, raise_errors=True):
+    def build(self, *argv, raise_errors=False):
         config = Config().parse_args(*argv)
 
         match config.color:
@@ -477,6 +493,8 @@ class Engine:
                 return asyncio.run(self._build_loop(bus, config))
 
         except BuildError as e:
+            if config.debug:
+                traceback.print_exc()
             if raise_errors:
                 raise e
 
@@ -582,4 +600,4 @@ task = engine.task
 
 # --------------------------------------------------------------------
 def build():
-    return engine.build(*sys.argv[1:], raise_errors=False)
+    return engine.build(*sys.argv[1:])

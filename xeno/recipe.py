@@ -529,6 +529,8 @@ class Recipe:
     def add_dependency(self, dep: "Recipe"):
         assert isinstance(dep, Recipe), f"Value `{dep}` is not a recipe."
         self._deps.append(dep)
+        for component in self.components():
+            component.add_dependency(dep)
 
     def dependencies(self) -> Generator["Recipe", None, None]:
         yield from self._deps
@@ -617,17 +619,23 @@ class Recipe:
                 exceptions, "Failed to clean one or more components."
             )
 
+    async def clean_deps(self):
+        deps = [*self.dependencies()]
+        results = await asyncio.gather(
+
+        )
+
     async def make_dependencies(self):
         recipes = [*self.dependencies()]
         if self.sync:
             for c in recipes:
                 try:
-                    await c(skiplock=True)
+                    await c()
                 except Exception as e:
                     raise self.error("Failed to make a dependency.") from e
         else:
             results = await asyncio.gather(
-                *(c(skiplock=True) for c in recipes), return_exceptions=True
+                *(c() for c in recipes), return_exceptions=True
             )
             exceptions = [e for e in results if isinstance(e, Exception)]
             if exceptions:
@@ -726,10 +734,7 @@ class Recipe:
 
         return result
 
-    async def __call__(self, skiplock=False):
-        if self.lock.locked() and skiplock:
-            return None
-
+    async def __call__(self):
         async with self.lock:
             if self.done():
                 if self.has_target():

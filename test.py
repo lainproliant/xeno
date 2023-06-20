@@ -978,7 +978,7 @@ class XenoBuildTests(unittest.TestCase):
 
         @provide
         def file():
-            return Path("/etc/hosts")
+            return Path("LICENSE")
 
         @task
         def print_file(file):
@@ -1145,7 +1145,7 @@ class XenoBuildTests(unittest.TestCase):
             return forced_failure()
 
         with self.assertRaises(BuildError):
-            engine.build()
+            engine.build(raise_errors=True)
 
 
 # --------------------------------------------------------------------
