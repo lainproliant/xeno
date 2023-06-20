@@ -7,6 +7,7 @@ import time
 import tracemalloc
 import unittest
 import uuid
+import types
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -736,7 +737,7 @@ class CommonXenoTests(unittest.TestCase):
                 outerSelf.assertEqual(
                     attrs.get(Tags.RESOURCE_FULL_NAME), "com/example/core/oranges"
                 )
-                return "oranges"
+                return Path("oranges")
 
         injector = self.make_injector(Core())
 
@@ -876,6 +877,25 @@ class CommonXenoTests(unittest.TestCase):
         self.assertIsInstance(value, str)
         self.assertEqual(value, "1234567890")
 
+    def test_yielding_provider(self):
+        injector = self.make_injector()
+
+        @injector.provide
+        def generated_sequence():
+            for i in range(10):
+                yield i
+
+        value = injector.require("generated_sequence")
+        self.assertTrue(isinstance(value, types.GeneratorType))
+        value = [*value]
+        self.assertEqual(value, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+
+        # We should be given a new generator this time.
+        value = injector.require("generated_sequence")
+        self.assertTrue(isinstance(value, types.GeneratorType))
+        value = [*value]
+        self.assertEqual(value, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+
 
 # --------------------------------------------------------------------
 class SyncXenoTests(CommonXenoTests):
@@ -960,6 +980,30 @@ class XenoBuildTests(unittest.TestCase):
 
         result = engine.build("make_three", "make_five", "make_seven")
         self.assertEqual(result, [3, 5, 7])
+
+    def test_yielding_provider_build(self):
+        engine = build.Engine()
+
+        @engine.provide
+        def generated_sequence():
+            for i in range(10):
+                yield i
+
+        @engine.recipe
+        def sequence_printer(seq):
+            # xeno.build should be expanding generators returned
+            # from providers into static sequences.
+            self.assertTrue(isinstance(seq, list))
+            self.assertEqual(seq, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+            print(seq)
+            return 0
+
+        @engine.task(default=True)
+        def print_sequence(generated_sequence):
+            return sequence_printer(generated_sequence)
+
+        result = engine.build()
+        self.assertEqual(result, [0])
 
     def test_shell_recipe_and_async_timing(self):
         from xeno.build import provide, recipe, task, engine
