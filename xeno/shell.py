@@ -8,10 +8,10 @@
 # --------------------------------------------------------------------
 
 import asyncio
-import multiprocessing
 import os
 import shlex
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Union
 
@@ -76,6 +76,24 @@ def check(cmd: Union[str, Iterable[str]]):
     else:
         args = [*cmd]
     return subprocess.check_output(args).decode("utf-8").strip()
+
+
+# --------------------------------------------------------------------
+def remove_paths(*paths: Path, as_user: Optional[str] = None):
+    for path in paths:
+        if as_user is not None:
+            result = Shell().interact_as(as_user, ["rm", "-rf", str(path.absolute())])
+            if result != 0:
+                raise RuntimeError(f"Failed to remove path `f{path}` as `f{as_user}`.")
+
+        else:
+            if not path.exists():
+                continue
+
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
 
 
 # --------------------------------------------------------------------
@@ -173,7 +191,9 @@ class Shell:
                 setup_rl_task(proc.stderr, stderr)
 
             while rl_tasks:
-                done, _ = await asyncio.wait(rl_tasks, return_when=asyncio.FIRST_COMPLETED)
+                done, _ = await asyncio.wait(
+                    rl_tasks, return_when=asyncio.FIRST_COMPLETED
+                )
 
                 for future in done:
                     stream, sink = rl_tasks.pop(future)

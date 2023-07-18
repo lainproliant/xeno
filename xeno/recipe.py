@@ -9,7 +9,6 @@
 
 import asyncio
 import inspect
-import shutil
 import sys
 import uuid
 from dataclasses import dataclass
@@ -19,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional
 
 from xeno.events import Event, EventBus
-from xeno.shell import PathSpec, Shell
+from xeno.shell import PathSpec, Shell, remove_paths
 from xeno.utils import async_map, async_vwrap, async_wrap, is_iterable
 
 # --------------------------------------------------------------------
@@ -63,8 +62,8 @@ class CompositeError(Exception):
 
         sb.append(self.msg)
         for exc in self.exceptions:
-            header = f'{exc.__class__.__qualname__}: '
-            lines = str(exc).split('\n')
+            header = f"{exc.__class__.__qualname__}: "
+            lines = str(exc).split("\n")
             lines[0] = header + lines[0]
 
             for line in lines:
@@ -383,6 +382,7 @@ class Recipe:
         setup: Optional["Recipe"] = None,
         sigil: Optional[FormatF] = None,
         static_files: Iterable[PathSpec] = [],
+        cleanup_files: Iterable[PathSpec] = [],
         sync=False,
         target: Optional[PathSpec] = None,
     ):
@@ -403,7 +403,12 @@ class Recipe:
         self.memoize = memoize
         self.name = name
         self.setup = setup
-        self.static_files = [Path(s) for s in static_files if s != target]
+        self.static_files = [
+            Path(s) for s in static_files if target is None or Path(s) != Path(target)
+        ]
+        self.cleanup_files = [
+            Path(s) for s in cleanup_files if target is None or Path(s) != Path(target)
+        ]
         self.sync = sync
 
         if parent:
@@ -576,23 +581,13 @@ class Recipe:
         return self.age(ref) > self.inputs_age(ref)
 
     async def clean(self):
+        remove_paths(*self.cleanup_files, as_user=self.as_user)
+
         if not self.has_target() or not self.target.exists() or self.keep:
             return
 
         try:
-            if self.as_user:
-                result = Shell().interact_as(
-                    self.as_user, ["rm", "-rf", str(self.target.absolute())]
-                )
-                if result != 0:
-                    raise RuntimeError(
-                        f"Failed to delete `f{self.target}` as `f{self.as_user}`."
-                    )
-            else:
-                if self.target.is_dir():
-                    shutil.rmtree(self.target)
-                else:
-                    self.target.unlink()
+            remove_paths(self.target, as_user=self.as_user)
 
         except Exception as e:
             raise self.error("Failed to clean target.") from e

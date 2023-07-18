@@ -28,6 +28,7 @@ from xeno.events import Event, EventBus
 from xeno.recipe import BuildError, Events, Recipe
 from xeno.shell import Environment, Shell
 from xeno.spinner import Spinner
+from xeno.utils import is_iterable
 
 # --------------------------------------------------------------------
 EngineHook = Callable[["Config", "Engine", EventBus], None]
@@ -282,6 +283,7 @@ class Engine:
         keep=False,
         memoize=True,
         sync=False,
+        cleanup: Optional[str | Iterable[str]] = None,
     ):
         """
         Decorator for defining a task recipe for a build.
@@ -313,6 +315,7 @@ class Engine:
                     keep=keep,
                     sync=sync,
                     memoize=memoize,
+                    cleanup=cleanup
                 )(f),
             )
             attrs = MethodAttributes.for_method(target_wrapper, True, True)

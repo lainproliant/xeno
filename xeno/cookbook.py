@@ -48,6 +48,7 @@ def recipe(
     memoize=False,
     sigil: Optional[FormatF] = None,
     sync=False,
+    cleanup: Optional[str | Iterable[str]] = None,
 ):
     """
     Decorator for a function that defines a recipe template.
@@ -80,6 +81,9 @@ def recipe(
     If `memoize` is provided, the recipe result is not recalculated by
     other dependencies, and the recipe implementation will only be
     evaluated once.
+
+    If `cleanup` is provided, the referenced path(s) will additionally
+    be removed when the resulting task is cleaned.
     """
 
     name = None if callable(name_or_f) else name_or_f
@@ -89,6 +93,8 @@ def recipe(
         def target_wrapper(*args, **kwargs):
             truename = name or f.__name__
             scanner = Recipe.scan(args, kwargs)
+            cleanup_files = [] if cleanup is None else list_or_delim(cleanup)
+            cleanup_paths = [Path(s) for s in cleanup_files]
 
             if factory:
                 if inspect.iscoroutinefunction(f):
@@ -110,6 +116,7 @@ def recipe(
                         memoize=memoize,
                         name=truename,
                         sync=sync,
+                        cleanup_files=cleanup_paths,
                     )
                 else:
                     result = cast(Recipe, result)
@@ -120,6 +127,7 @@ def recipe(
                     result.memoize = memoize
                     result.name = truename
                     result.sync = sync
+                    result.cleanup_files = cleanup_paths
 
             else:
                 result = Lambda(
@@ -132,6 +140,7 @@ def recipe(
                     memoize=memoize,
                     name=truename,
                     sync=sync,
+                    cleanup_files=cleanup_paths
                 )
 
             if sigil:
