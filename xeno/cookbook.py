@@ -140,7 +140,7 @@ def recipe(
                     memoize=memoize,
                     name=truename,
                     sync=sync,
-                    cleanup_files=cleanup_paths
+                    cleanup_files=cleanup_paths,
                 )
 
             if sigil:
@@ -180,6 +180,14 @@ class ShellRecipe(Recipe):
                 return f"{recipe.program_name()}:{recipe.rtarget()}"
             else:
                 return f"{recipe.program_name()}"
+
+        def start(self, recipe: Recipe) -> str:
+            assert isinstance(recipe, ShellRecipe)
+            recipe = cast(ShellRecipe, recipe)
+            cmd = recipe.shell.interpolate(
+                recipe.cmd, recipe.scanner.kwargs(Recipe.PassMode.TARGETS)
+            )
+            return cmd
 
     def __init__(
         self,

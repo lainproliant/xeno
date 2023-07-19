@@ -384,7 +384,6 @@ class Engine:
                 return await asyncio.gather(
                     *[task.clean() for task in tasks],
                     *[task.clean_components(recursive=True) for task in tasks],
-                    *[task.clean_deps() for task in tasks],
                 )
             case _:
                 raise ValueError("Config.cleanup_mode not specified.")

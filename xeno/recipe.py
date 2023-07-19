@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Optional
 
 from xeno.events import Event, EventBus
-from xeno.shell import PathSpec, Shell, remove_paths
+from xeno.shell import PathSpec, remove_paths
 from xeno.utils import async_map, async_vwrap, async_wrap, is_iterable
 
 # --------------------------------------------------------------------
@@ -514,6 +514,8 @@ class Recipe:
     def age(self, ref: datetime) -> timedelta:
         if self.has_target() and self.target.exists():
             return ref - datetime.fromtimestamp(self.target.stat().st_mtime)
+        if self.has_target() and self.target.is_symlink():
+            return timedelta.min
         return timedelta.min
 
     def static_files_age(self, ref: datetime) -> timedelta:
@@ -571,6 +573,8 @@ class Recipe:
 
     def done(self) -> bool:
         if self.has_target():
+            if self.target.is_symlink():
+                return True
             return self.target.exists() and not self.outdated(datetime.now())
         return self.saved_result is not None
 
@@ -578,12 +582,18 @@ class Recipe:
         return all(c.done() for c in self.components())
 
     def outdated(self, ref: datetime) -> bool:
+        if self.has_target() and self.target.is_symlink():
+            return False
         return self.age(ref) > self.inputs_age(ref)
 
     async def clean(self):
         remove_paths(*self.cleanup_files, as_user=self.as_user)
 
-        if not self.has_target() or not self.target.exists() or self.keep:
+        if (
+            not self.has_target()
+            or (not self.target.exists() and not self.target.is_symlink())
+            or self.keep
+        ):
             return
 
         try:
@@ -613,12 +623,6 @@ class Recipe:
             raise self.composite_error(
                 exceptions, "Failed to clean one or more components."
             )
-
-    async def clean_deps(self):
-        deps = [*self.dependencies()]
-        results = await asyncio.gather(
-
-        )
 
     async def make_dependencies(self):
         recipes = [*self.dependencies()]
