@@ -90,7 +90,7 @@ def remove_paths(*paths: Path, as_user: Optional[str] = None):
             if not path.exists():
                 continue
 
-            if path.is_dir():
+            if path.is_dir() and not path.is_symlink():
                 shutil.rmtree(path)
             else:
                 path.unlink()
