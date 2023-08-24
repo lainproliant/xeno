@@ -1187,6 +1187,27 @@ class XenoBuildTests(unittest.TestCase):
             if output_dir.exists():
                 shutil.rmtree(output_dir)
 
+    def test_target_queries(self):
+        engine = Engine()
+
+        @engine.recipe
+        def passthru(x):
+            return x
+
+        @engine.task
+        def apples():
+            return passthru(1)
+
+        @engine.task
+        def oranges():
+            return passthru(2)
+
+        self.assertEqual(0, engine.build("-Q", "apples"))
+        self.assertEqual(0, engine.build("-Q", "apples,oranges"))
+        self.assertEqual(1, engine.build("-Q", "apples,bananas"))
+        self.assertEqual(1, engine.build("-Q", "oranges,bananas"))
+        self.assertEqual(2, engine.build("-Q", "pineapples,bananas"))
+
     def test_failed_build(self):
         engine = Engine()
         engine.add_hook(DefaultEngineHook())

@@ -44,6 +44,7 @@ class Config:
         LIST_ALL = "list_all"
         REBUILD = "rebuild"
         TREE = "tree"
+        QUERY = "query"
 
     class CleanupMode:
         NONE = "none"
@@ -72,6 +73,7 @@ class Config:
         self.tasks: list[str] = []
         self.to_stdout = False
         self.verbose = 0
+        self.query: Optional[str] = None
 
     def _argparser(self):
         parser = ArgumentParser(
@@ -136,6 +138,11 @@ class Config:
             help="Only print info/warning/error event contents to stderr, nothing else.",
         )
         parser.add_argument(
+            "--query",
+            "-Q",
+            help="Return 0 if the given target or comma separated list of targets exist, 1 otherwise, do nothing else.",
+        )
+        parser.add_argument(
             "--to-stdout",
             "-s",
             action="store_true",
@@ -193,6 +200,8 @@ class Config:
             self.mode = Config.Mode.CLEAN
         if self.mode == Config.Mode.REBUILD:
             self.cleanup_mode = Config.CleanupMode.RECURSIVE
+        if self.query is not None:
+            self.mode = Config.Mode.QUERY
         return self
 
 
@@ -210,7 +219,7 @@ class Engine:
         self.env = Environment.context()
         self.injector = AsyncInjector()
         self.scan = Recipe.Scanner()
-        self.txt = TextDecorator(outfile=sys.stderr)
+        self.txt = TextDecorator()
 
     def add_hook(self, hook: EngineHook):
         self.bus_hooks.append(hook)
@@ -315,7 +324,7 @@ class Engine:
                     keep=keep,
                     sync=sync,
                     memoize=memoize,
-                    cleanup=cleanup
+                    cleanup=cleanup,
                 )(f),
             )
             attrs = MethodAttributes.for_method(target_wrapper, True, True)
@@ -436,6 +445,13 @@ class Engine:
 
         return 0
 
+    def _query_tasks(self, config: Config, tasks: Iterable[Recipe]):
+        assert config.query is not None
+        task_names = set([t.callsign for t in tasks])
+        query_names = config.query.split(",")
+        missing_names = [name for name in query_names if name not in task_names]
+        return len(missing_names)
+
     async def build_async(self, config: Config) -> list[Any]:
         bus = EventBus.get()
         max_jobs = Shell.max_jobs
@@ -454,6 +470,8 @@ class Engine:
                     return await self._print_help(config, await self.tasks())
                 case Config.Mode.LIST:
                     return self._list_tasks(config, await self.tasks())
+                case Config.Mode.QUERY:
+                    return self._query_tasks(config, await self.tasks())
                 case Config.Mode.LIST_ALL:
                     return self._list_tasks(
                         config, (await self.addressable_task_map()).values()
