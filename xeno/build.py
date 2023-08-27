@@ -450,7 +450,8 @@ class Engine:
         task_names = set([t.callsign for t in tasks])
         query_names = config.query.split(",")
         missing_names = [name for name in query_names if name not in task_names]
-        return len(missing_names)
+        if missing_names is not None:
+            raise BuildError(f"{','.join(missing_names)}")
 
     async def build_async(self, config: Config) -> list[Any]:
         bus = EventBus.get()
@@ -620,4 +621,5 @@ task = engine.task
 
 # --------------------------------------------------------------------
 def build():
-    return engine.build(*sys.argv[1:])
+    engine.build(*sys.argv[1:])
+    sys.exit(0)
