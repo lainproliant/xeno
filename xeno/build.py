@@ -221,6 +221,17 @@ class Engine:
         self.scan = Recipe.Scanner()
         self.txt = TextDecorator()
 
+        self._build_mode_methods = {
+            Config.Mode.BUILD: self._build_mode_build,
+            Config.Mode.CLEAN: self._build_mode_clean,
+            Config.Mode.HELP: self._build_mode_help,
+            Config.Mode.LIST: self._build_mode_list,
+            Config.Mode.QUERY: self._build_mode_query,
+            Config.Mode.LIST_ALL: self._build_mode_list_all,
+            Config.Mode.REBUILD: self._build_mode_rebuild,
+            Config.Mode.TREE: self._build_mode_tree,
+        }
+
     def add_hook(self, hook: EngineHook):
         self.bus_hooks.append(hook)
 
@@ -363,40 +374,6 @@ class Engine:
 
         return tasks
 
-    async def _make_tasks(self, config, tasks):
-        self.scan.scan_params(*tasks)
-
-        try:
-            while self.scan.has_recipes():
-                await self.scan.gather_all()
-
-            args = self.scan.args(Recipe.PassMode.RESULTS)
-            self.scan.clear()
-            self.txt("OK", fg="green", render="bold")
-            return args
-
-        except BuildError as e:
-            self.txt.embrace("ERROR", fg="red", render="bold")
-            self.txt("FAIL", fg="red", render="bold")
-            raise e
-
-    async def _clean_tasks(self, config, tasks):
-        match config.cleanup_mode:
-            case Config.CleanupMode.SHALLOW:
-                return await asyncio.gather(*[task.clean() for task in tasks])
-            case Config.CleanupMode.RECURSIVE:
-                return await asyncio.gather(
-                    *[task.clean() for task in tasks],
-                    *[task.clean_components(recursive=True) for task in tasks],
-                )
-            case Config.CleanupMode.RECURSIVE_WITH_DEPS:
-                return await asyncio.gather(
-                    *[task.clean() for task in tasks],
-                    *[task.clean_components(recursive=True) for task in tasks],
-                )
-            case _:
-                raise ValueError("Config.cleanup_mode not specified.")
-
     async def _print_help(self, config: Config, tasks: Iterable[Recipe]):
         parser = config._argparser()
 
@@ -445,14 +422,6 @@ class Engine:
 
         return 0
 
-    def _query_tasks(self, config: Config, tasks: Iterable[Recipe]):
-        assert config.query is not None
-        task_names = set([t.callsign for t in tasks])
-        query_names = config.query.split(",")
-        missing_names = [name for name in query_names if name not in task_names]
-        if missing_names is not None:
-            raise BuildError(f"{','.join(missing_names)}")
-
     async def build_async(self, config: Config) -> list[Any]:
         bus = EventBus.get()
         max_jobs = Shell.max_jobs
@@ -460,36 +429,87 @@ class Engine:
         try:
             Shell.set_max_jobs(config.jobs)
 
-            match config.mode:
-                case Config.Mode.BUILD:
-                    tasks = await self._resolve_tasks(config)
-                    return await self._make_tasks(config, tasks)
-                case Config.Mode.CLEAN:
-                    tasks = await self._resolve_tasks(config)
-                    return await self._clean_tasks(config, tasks)
-                case Config.Mode.HELP:
-                    return await self._print_help(config, await self.tasks())
-                case Config.Mode.LIST:
-                    return self._list_tasks(config, await self.tasks())
-                case Config.Mode.QUERY:
-                    return self._query_tasks(config, await self.tasks())
-                case Config.Mode.LIST_ALL:
-                    return self._list_tasks(
-                        config, (await self.addressable_task_map()).values()
-                    )
+            try:
+                mode_method = self._build_mode_methods[config.mode]
 
-                case Config.Mode.REBUILD:
-                    tasks = await self._resolve_tasks(config)
-                    await self._clean_tasks(config, tasks)
-                    return await self._make_tasks(config, tasks)
-                case Config.Mode.TREE:
-                    return self._list_task_tree(await self.tasks())
-                case _:
-                    raise RuntimeError("Unknown mode encountered.")
+            except IndexError:
+                raise RuntimeError("Unknown build mode encountered: {config.mode}")
+
+            return await mode_method(config)
 
         finally:
             Shell.set_max_jobs(max_jobs)
             bus.shutdown()
+
+    async def _build_mode_build(self, config: Config):
+        tasks = await self._resolve_tasks(config)
+        self.scan.scan_params(*tasks)
+
+        try:
+            while self.scan.has_recipes():
+                await self.scan.gather_all()
+
+            args = self.scan.args(Recipe.PassMode.RESULTS)
+            self.scan.clear()
+            self.txt("OK", fg="green", render="bold")
+            return args
+
+        except BuildError as e:
+            self.txt.embrace("ERROR", fg="red", render="bold")
+            self.txt("FAIL", fg="red", render="bold")
+            raise e
+
+    async def _build_mode_clean(self, config: Config):
+        tasks = await self._resolve_tasks(config)
+        match config.cleanup_mode:
+            case Config.CleanupMode.SHALLOW:
+                return await asyncio.gather(*[task.clean() for task in tasks])
+            case Config.CleanupMode.RECURSIVE:
+                return await asyncio.gather(
+                    *[task.clean() for task in tasks],
+                    *[task.clean_components(recursive=True) for task in tasks],
+                )
+            case Config.CleanupMode.RECURSIVE_WITH_DEPS:
+                return await asyncio.gather(
+                    *[task.clean() for task in tasks],
+                    *[task.clean_components(recursive=True) for task in tasks],
+                )
+            case _:
+                raise ValueError("Config.cleanup_mode not specified.")
+
+    async def _build_mode_help(self, config: Config):
+        tasks = await self.tasks()
+        parser = config._argparser()
+
+        self.txt(f"# {self.name}")
+        self.txt(parser.format_help(), render="dim")
+        self.txt("")
+        self.txt("# Target Tasks")
+        await self._list_tasks(config, tasks)
+        await self._build_mode_list(config)
+
+    async def _build_mode_list(self, config: Config):
+        return self._list_tasks(config, await self.tasks())
+
+    async def _build_mode_list_all(self, config: Config):
+        return self._list_tasks(
+            config, (await self.addressable_task_map()).values()
+        )
+
+    async def _build_mode_query(self, config: Config):
+        assert config.query is not None
+        tasks = await self.tasks()
+        task_names = set([t.callsign for t in tasks])
+        query_names = config.query.split(",")
+        missing_names = [name for name in query_names if name not in task_names]
+        return len(missing_names)
+
+    async def _build_mode_rebuild(self, config: Config):
+        await self._build_mode_clean(config)
+        return await self._build_mode_build(config)
+
+    async def _build_mode_tree(self, config: Config):
+        return self._list_task_tree(await self.tasks())
 
     async def _build_loop(self, bus, config: Config):
         result, _ = await asyncio.gather(self.build_async(config), bus.run())
@@ -621,5 +641,7 @@ task = engine.task
 
 # --------------------------------------------------------------------
 def build():
-    engine.build(*sys.argv[1:])
+    result = engine.build(*sys.argv[1:])
+    if isinstance(result, int):
+        sys.exit(result)
     sys.exit(0)
