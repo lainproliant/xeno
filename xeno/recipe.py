@@ -7,6 +7,7 @@
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
 
+import os
 import asyncio
 import inspect
 import sys
@@ -15,11 +16,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Generator, Iterable, Optional
+from typing import Any, Callable, Generator, Iterable, Optional, cast, no_type_check
 
+from xeno.attributes import MethodAttributes
 from xeno.events import Event, EventBus
 from xeno.shell import PathSpec, remove_paths
-from xeno.utils import async_map, async_vwrap, async_wrap, is_iterable
+from xeno.utils import async_map, async_vwrap, async_wrap, is_iterable, list_or_delim
 
 # --------------------------------------------------------------------
 UNICODE_SUPPORT = sys.stdout.encoding.lower().startswith("utf")
@@ -120,7 +122,7 @@ class Recipe:
 
         def sigil(self, recipe: "Recipe") -> str:
             if recipe.has_target():
-                return f"{recipe.name}{Recipe.SIGIL_DELIMITER}{recipe.rtarget()}"
+                return f"{recipe.name}{Recipe.SIGIL_DELIMITER}{recipe.rel_target()}"
             return recipe.name
 
         def start(self, recipe: "Recipe") -> str:
@@ -176,9 +178,9 @@ class Recipe:
 
             if is_iterable(arg):
                 arg = [*arg]
-                if all(isinstance(x, Recipe) for x in arg):
+                if arg and all(isinstance(x, Recipe) for x in arg):
                     return arg, Recipe.ParamType.RECIPE
-                if all(isinstance(x, Path) for x in arg):
+                if arg and all(isinstance(x, Path) for x in arg):
                     return arg, Recipe.ParamType.PATH
 
             if isinstance(arg, Path):
@@ -682,16 +684,24 @@ class Recipe:
         except ValueError:
             return other
 
-    def rtarget(self):
+    def rel_target(self):
         try:
             return self.target.relative_to(Path.cwd())
         except ValueError:
             return self.target
 
-    def rtarget_or(self, other):
+    def rel_target_or(self, other):
         if self._target is None:
             return other
-        return self.rtarget()
+        return self.rel_target()
+
+    def exe_target(self) -> str:
+        rel_target = self.rel_target()
+        if not rel_target.is_absolute() and not rel_target.parent:
+            target = Path.cwd() / rel_target
+            if target.is_file() and os.access(target, os.X_OK):
+                return f"./{str(self.rel_target)}"
+        return str(rel_target)
 
     def target_or(self, other):
         if self._target is None:
@@ -803,3 +813,147 @@ class Lambda(Recipe):
             *self.scanner.args(self.pass_mode),
             **self.scanner.kwargs(self.pass_mode),
         )
+
+
+# --------------------------------------------------------------------
+def _inject_dependency(recipe: Recipe, dep):
+    if is_iterable(dep):
+        for d in dep:
+            _inject_dependency(recipe, d)
+    else:
+        recipe.add_dependency(dep)
+
+
+# --------------------------------------------------------------------
+def _inject_dependencies(
+    recipe: Recipe, deps: Iterable[str], bound_args: inspect.BoundArguments
+):
+    for dep in deps:
+        dobj = bound_args.arguments.get(dep)
+        _inject_dependency(recipe, dobj)
+
+
+# --------------------------------------------------------------------
+def recipe(
+    name_or_f: Optional[str | Callable] = None,
+    *,
+    dep: Optional[str | Iterable[str]] = None,
+    docs: Optional[str] = None,
+    factory=False,
+    fmt: Optional[Recipe.Format] = None,
+    keep=False,
+    memoize=False,
+    sigil: Optional[FormatF] = None,
+    sync=False,
+    cleanup: Optional[str | Iterable[str]] = None,
+):
+    """
+    Decorator for a function that defines a recipe template.
+
+    The function is meant to be a recipe implementation method.  The
+    parameters eventually passed to the method depend on whether the
+    parameters are recipes or plain values.  Each recipe parameter has its
+    result passed, whereas plain values are passed through unmodified.
+
+    Can be called with no parameters.  In this mode, the name is assumed
+    to be the name of the decorated function and all other parameters
+    are set to their defaults.
+
+    If `factory` is true, the function is a recipe factory that returns one
+    or more recipes and the values passed to it are the recipe objects
+    named.
+
+    If `name` is provided, it is used as the name of the recipe.  Otherwise,
+    the name of the recipe is inferred to be the name of the decorated
+    function.
+
+    Otherwise, the function is interpreted as a recipe implementation
+    method and the values passed to it when it is eventually called
+    are the result values of its dependencies.
+
+    If `sync` is provided, the resulting recipe's dependencies are resolved
+    synchronously.  Otherwise, they are resolved asynchronously using
+    asyncio.gather().
+
+    If `memoize` is provided, the recipe result is not recalculated by
+    other dependencies, and the recipe implementation will only be
+    evaluated once.
+
+    If `cleanup` is provided, the referenced path(s) will additionally
+    be removed when the resulting task is cleaned.
+    """
+
+    name = None if callable(name_or_f) else name_or_f
+
+    def wrapper(f):
+        @MethodAttributes.wraps(f)
+        def target_wrapper(*args, **kwargs):
+            truename = name or f.__name__
+            scanner = Recipe.scan(args, kwargs)
+            cleanup_files = [] if cleanup is None else list_or_delim(cleanup)
+            cleanup_paths = [Path(s) for s in cleanup_files]
+
+            if factory:
+                if inspect.iscoroutinefunction(f):
+                    raise ValueError(
+                        "Recipe factories should not be coroutines.  You should define asynchronous behavior in recipes and return these from recipe factories and target definitions instead."
+                    )
+
+                result = f(
+                    *scanner.args(Recipe.PassMode.NORMAL),
+                    **scanner.kwargs(Recipe.PassMode.NORMAL),
+                )
+
+                if is_iterable(result):
+                    result = Recipe(
+                        [*result],
+                        docs=docs,
+                        fmt=fmt or Recipe.Format(),
+                        keep=keep,
+                        memoize=memoize,
+                        name=truename,
+                        sync=sync,
+                        cleanup_files=cleanup_paths,
+                    )
+                else:
+                    result = cast(Recipe, result)
+
+                    result.docs = docs
+                    result.fmt = fmt or result.fmt
+                    result.keep = keep
+                    result.memoize = memoize
+                    result.name = truename
+                    result.sync = sync
+                    result.cleanup_files = cleanup_paths
+
+            else:
+                result = Lambda(
+                    f,
+                    [*args],
+                    {**kwargs},
+                    docs=docs,
+                    fmt=fmt or Recipe.Format(),
+                    keep=keep,
+                    memoize=memoize,
+                    name=truename,
+                    sync=sync,
+                    cleanup_files=cleanup_paths,
+                )
+
+            if sigil:
+                result.fmt = Recipe.FormatOverride(result.fmt, sigil=sigil)
+
+            _inject_dependencies(
+                result,
+                [] if dep is None else list_or_delim(dep),
+                scanner.bind(f, Recipe.PassMode.NORMAL),
+            )
+
+            return result
+
+        return target_wrapper
+
+    if callable(name_or_f):
+        return no_type_check(wrapper(name_or_f))
+
+    return no_type_check(cast(Callable[[Callable], Callable], wrapper))

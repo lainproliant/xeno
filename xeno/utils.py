@@ -12,9 +12,14 @@ import inspect
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Generator, Iterable
+from typing import Any, Generator, Iterable, Union, TypeVar
 
-from .errors import InjectionError
+from xeno.errors import InjectionError
+from xeno.typedefs import NestedIterable
+
+
+# --------------------------------------------------------------------
+T = TypeVar("T")
 
 
 # --------------------------------------------------------------------
@@ -104,3 +109,12 @@ def list_or_delim(obj: str | Iterable[str], delim=",") -> Generator[str, None, N
         yield from list_or_delim(obj.split(delim))
     else:
         yield from obj
+
+
+# --------------------------------------------------------------------
+def expand(val: T | NestedIterable[T]) -> Iterable[T]:
+    if is_iterable(val):
+        for v in val:
+            yield from expand(v)
+    else:
+        yield val

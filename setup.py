@@ -11,8 +11,8 @@ with open(path.join(here, "README.md"), encoding="utf-8") as f:
 
 setup(
     name="xeno",
-    version="6.4.1",
-    description="The Python dependency injector from outer space.",
+    version="7.0.0",
+    description="The Python IOC app and build framework from outer space.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/lainproliant/xeno",
@@ -27,7 +27,7 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
     ],
-    keywords="IOC dependency injector",
+    keywords="IOC dependency injector build system",
     packages=find_packages(),
     install_requires=[],
     extras_require={},

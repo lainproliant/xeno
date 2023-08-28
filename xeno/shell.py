@@ -12,33 +12,70 @@ import os
 import shlex
 import subprocess
 import shutil
+import itertools
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Union, Sequence
 
 from xeno.utils import decode, is_iterable
 
 
 # --------------------------------------------------------------------
-class Environment(dict[str, Any]):
+class Environment(dict[str, str]):
     """
     An environment dictionary that knows how to append shell
     flag variables together when added to other dictionaries.
     """
 
-    @staticmethod
-    def context():
-        return Environment(os.environ)
+    @classmethod
+    def context(cls):
+        return cls(os.environ)
 
-    def __add__(self, rhs: Any) -> "Environment":
-        env = Environment()
-        for key, value in rhs.items():
-            if key in self:
-                if not is_iterable(value):
-                    value = shlex.split(value)
-                env[key] = shlex.join(shlex.split(self[key]) + value)
+    @classmethod
+    def select(
+        cls, *names: str, append: Optional[Sequence[str] | str] = None, **defaults: Any
+    ) -> "Environment":
+        env = cls.context()
+        filtered_env = cls()
+        if isinstance(append, str):
+            append = append.split(",")
+        append_set = set(append or [])
+        for name in itertools.chain(names, defaults.keys()):
+            if name in env:
+                filtered_env[name] = env[name]
+                if name in append_set and name in defaults:
+                    filtered_env += {name: defaults[name]}
+            elif name in defaults:
+                filtered_env[name] = defaults[name]
             else:
-                env[key] = value
-        return env
+                filtered_env[name] = ""
+        return filtered_env
+
+    def split(self, key: str, default: Optional[Sequence[str]] = None):
+        if key in self:
+            return shlex.split(self[key])
+        else:
+            return default or []
+
+    def __setitem__(self, key: str, value: Any):
+        if is_iterable(value):
+            value = shlex.join([str(s) for s in value])
+        super().__setitem__(key, str(value))
+
+    def __add__(self, rhs: dict[str, str | Iterable[str]]) -> "Environment":
+        new_env = Environment()
+        for key, rhs_value in rhs.items():
+            if key in self:
+                lhs_value = self.split(key)
+                if isinstance(rhs, Environment):
+                    rhs_value = rhs.split(key)
+                    new_env[key] = lhs_value + rhs_value
+                elif is_iterable(rhs_value):
+                    new_env[key] = lhs_value + [str(s) for s in rhs_value]
+                else:
+                    new_env[key] = lhs_value + shlex.split(rhs_value)
+            else:
+                new_env[key] = rhs_value
+        return new_env
 
 
 # --------------------------------------------------------------------
@@ -173,10 +210,10 @@ class Shell:
         **params,
     ) -> int:
         async with self.job_semaphore:
-            rl_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
+            readline_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
 
-            def setup_rl_task(stream: asyncio.StreamReader, sink: LineSink):
-                rl_tasks[asyncio.Task(stream.readline())] = (stream, sink)
+            def setup_readline_task(stream: asyncio.StreamReader, sink: LineSink):
+                readline_tasks[asyncio.Task(stream.readline())] = (stream, sink)
 
             cmd = self.interpolate(cmd, params)
             proc = await self._create_proc(cmd)
@@ -186,23 +223,23 @@ class Shell:
                 assert proc.stdin
                 proc.stdin.write(stdin().encode("utf-8"))
             if stdout:
-                setup_rl_task(proc.stdout, stdout)
+                setup_readline_task(proc.stdout, stdout)
             if stderr:
-                setup_rl_task(proc.stderr, stderr)
+                setup_readline_task(proc.stderr, stderr)
 
-            while rl_tasks:
+            while readline_tasks:
                 done, _ = await asyncio.wait(
-                    rl_tasks, return_when=asyncio.FIRST_COMPLETED
+                    readline_tasks, return_when=asyncio.FIRST_COMPLETED
                 )
 
                 for future in done:
-                    stream, sink = rl_tasks.pop(future)
+                    stream, sink = readline_tasks.pop(future)
                     line = future.result()
                     if line:
                         line = decode(line).rstrip()
                         assert proc.stdin is not None
                         sink(line, proc.stdin)
-                        setup_rl_task(stream, sink)
+                        setup_readline_task(stream, sink)
 
             await proc.wait()
             assert proc.returncode is not None, "proc.returncode is None"
@@ -230,3 +267,8 @@ class Shell:
         cmd = self.interpolate(cmd, params)
         cmd = shlex.join(["sudo", "-u", as_user, "sh", "-c", cmd])
         return self._interact(cmd, check)
+
+
+# --------------------------------------------------------------------
+select_env = Environment.select
+get_env = Environment.context
