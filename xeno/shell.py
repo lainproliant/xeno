@@ -12,33 +12,66 @@ import os
 import shlex
 import subprocess
 import shutil
+import itertools
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Union, Sequence
 
 from xeno.utils import decode, is_iterable
 
 
 # --------------------------------------------------------------------
-class Environment(dict[str, Any]):
+class Environment(dict[str, str]):
     """
     An environment dictionary that knows how to append shell
     flag variables together when added to other dictionaries.
     """
 
-    @staticmethod
-    def context():
-        return Environment(os.environ)
+    @classmethod
+    def context(cls):
+        return cls(os.environ)
 
-    def __add__(self, rhs: Any) -> "Environment":
-        env = Environment()
-        for key, value in rhs.items():
+    @classmethod
+    def select(
+        cls, *names: str, append: Optional[Sequence[str] | str] = None, **defaults: Any
+    ) -> "Environment":
+        env = cls.context()
+        filtered_env = cls()
+        if isinstance(append, str):
+            append = append.split(",")
+        append_set = set(append or [])
+        for name in itertools.chain(names, defaults.keys()):
+            if name in env:
+                filtered_env[name] = env[name]
+                if name in append_set and name in defaults:
+                    filtered_env += {name: defaults[name]}
+            elif name in defaults:
+                filtered_env[name] = defaults[name]
+        return filtered_env
+
+    def split(self, key: str, default: Optional[Sequence[str]] = None):
+        if key in self:
+            return shlex.split(self[key])
+        else:
+            return default or []
+
+    def __setitem__(self, key: str, value: Any):
+        if is_iterable(value):
+            value = shlex.join([str(s) for s in value])
+        super().__setitem__(key, str(value))
+
+    def __add__(self, rhs: dict[str, str]) -> "Environment":
+        new_env = Environment()
+        for key, rhs_value in rhs.items():
             if key in self:
-                if not is_iterable(value):
-                    value = shlex.split(value)
-                env[key] = shlex.join(shlex.split(self[key]) + value)
+                lhs_value = self.split(key)
+                if isinstance(rhs, Environment):
+                    rhs_value = rhs.split(key)
+                    new_env[key] = lhs_value + rhs_value
+                else:
+                    new_env[key] = lhs_value + shlex.split(rhs_value)
             else:
-                env[key] = value
-        return env
+                new_env[key] = rhs_value
+        return new_env
 
 
 # --------------------------------------------------------------------
@@ -230,3 +263,8 @@ class Shell:
         cmd = self.interpolate(cmd, params)
         cmd = shlex.join(["sudo", "-u", as_user, "sh", "-c", cmd])
         return self._interact(cmd, check)
+
+
+# --------------------------------------------------------------------
+select_env = Environment.select
+get_env = Environment.context

@@ -28,7 +28,6 @@ from xeno.events import Event, EventBus
 from xeno.recipe import BuildError, Events, Recipe
 from xeno.shell import Environment, Shell
 from xeno.spinner import Spinner
-from xeno.utils import is_iterable
 
 # --------------------------------------------------------------------
 EngineHook = Callable[["Config", "Engine", EventBus], None]
