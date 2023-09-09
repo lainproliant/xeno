@@ -197,6 +197,11 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 7.1.0: Sep 09 2023
+- Add a `update()` override to `xeno.shell.Environment` which takes
+  the same arguments as `select()` but updates the dictionary in-place
+  instead of making and returning a new one.
+
 ### Version 7.0.0: Sep 09 2023
 - Lift various build recipes from different projects into a
   "batteries-included" set of build tools under `xeno.recipes.**`.

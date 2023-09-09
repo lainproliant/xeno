@@ -30,25 +30,29 @@ class Environment(dict[str, str]):
     def context(cls):
         return cls(os.environ)
 
-    @classmethod
     def select(
-        cls, *names: str, append: Optional[Sequence[str] | str] = None, **defaults: Any
+        self, *names: str, append: Optional[Sequence[str] | str] = None, **defaults: Any
     ) -> "Environment":
-        env = cls.context()
-        filtered_env = cls()
+        filtered_env = Environment()
         if isinstance(append, str):
             append = append.split(",")
         append_set = set(append or [])
         for name in itertools.chain(names, defaults.keys()):
-            if name in env:
-                filtered_env[name] = env[name]
+            if name in self:
+                filtered_env[name] = self[name]
                 if name in append_set and name in defaults:
                     filtered_env += {name: defaults[name]}
+                else:
+                    filtered_env[name] = defaults[name]
             elif name in defaults:
                 filtered_env[name] = defaults[name]
             else:
                 filtered_env[name] = ""
         return filtered_env
+
+    def update(self, *args, **kwargs):
+        new_dict = self.select(*args, **kwargs)
+        super().update(new_dict)
 
     def split(self, key: str, default: Optional[Sequence[str]] = None):
         if key in self:
@@ -76,6 +80,12 @@ class Environment(dict[str, str]):
             else:
                 new_env[key] = rhs_value
         return new_env
+
+    def __iadd__(self, rhs: dict[str, str | Iterable[str]]) -> "Environment":
+        new_dict = self + rhs
+        super().update(new_dict)
+        return self
+
 
 
 # --------------------------------------------------------------------
@@ -270,5 +280,9 @@ class Shell:
 
 
 # --------------------------------------------------------------------
-select_env = Environment.select
+def select_env(*args, **kwargs):
+    return Environment.context().select(*args, **kwargs)
+
+
+# --------------------------------------------------------------------
 get_env = Environment.context

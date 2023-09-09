@@ -951,6 +951,25 @@ class XenoEnvironmentTests(unittest.TestCase):
         newenv = pyenv + dict(CFLAGS=["-g", "-I./include"])
         self.assertEqual(newenv["CFLAGS"], expected_cflags)
 
+    def test_environment_update(self):
+        from xeno.shell import Environment
+
+        env = Environment(CC="clang", CFLAGS="-I./include", LDFLAGS="-g")
+        print(f'before {env=}')
+        env.update(
+            append="CFLAGS,LDFLAGS",
+            CC="gcc",
+            CFLAGS="-I./deps/include",
+            LDFLAGS="-lpthread",
+        )
+        print(f'after {env=}')
+        self.assertEqual(
+            Environment(
+                CC="gcc", CFLAGS="-I./include -I./deps/include", LDFLAGS="-g -lpthread"
+            ),
+            env
+        )
+
 
 # --------------------------------------------------------------------
 class XenoBuildTests(unittest.TestCase):
@@ -1262,7 +1281,7 @@ class XenoBatteriesIncludedTests(unittest.TestCase):
                 result=sh.result.STDOUT,
             )
 
-        result = engine.build('-D')
+        result = engine.build("-D")
         self.assertEqual([], result[0])
 
     def test_hello_c(self):
