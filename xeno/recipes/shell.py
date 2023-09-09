@@ -29,7 +29,7 @@ class ShellRecipe(Recipe):
             assert isinstance(recipe, ShellRecipe)
             recipe = cast(ShellRecipe, recipe)
             if recipe.has_target():
-                return f"{recipe.program_name()}:{recipe.rtarget()}"
+                return f"{recipe.program_name()}:{recipe.rel_target()}"
             else:
                 return f"{recipe.program_name()}"
 
@@ -70,7 +70,7 @@ class ShellRecipe(Recipe):
 
         self.as_user = as_user
 
-        def convert_cmd(cmd_comp):
+        def convert_cmd(cmd_comp) -> str:
             if isinstance(cmd_comp, str | Path):
                 return str(cmd_comp)
 
@@ -79,7 +79,10 @@ class ShellRecipe(Recipe):
                     cmd_comp.has_target()
                 ), "Recipe without a target can't be used in a shell command."
                 component_list.append(cmd_comp)
-                return str(cmd_comp.target)
+                target = cmd_comp.rel_target()
+                if Path.cwd() == target.parent.absolute():
+                    return f"./{target}"
+                return str(target)
 
             else:
                 raise ValueError(f"Invalid shell command component: {cmd_comp}")

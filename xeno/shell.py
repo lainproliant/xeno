@@ -210,10 +210,10 @@ class Shell:
         **params,
     ) -> int:
         async with self.job_semaphore:
-            rl_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
+            readline_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
 
-            def setup_rl_task(stream: asyncio.StreamReader, sink: LineSink):
-                rl_tasks[asyncio.Task(stream.readline())] = (stream, sink)
+            def setup_readline_task(stream: asyncio.StreamReader, sink: LineSink):
+                readline_tasks[asyncio.Task(stream.readline())] = (stream, sink)
 
             cmd = self.interpolate(cmd, params)
             proc = await self._create_proc(cmd)
@@ -223,23 +223,23 @@ class Shell:
                 assert proc.stdin
                 proc.stdin.write(stdin().encode("utf-8"))
             if stdout:
-                setup_rl_task(proc.stdout, stdout)
+                setup_readline_task(proc.stdout, stdout)
             if stderr:
-                setup_rl_task(proc.stderr, stderr)
+                setup_readline_task(proc.stderr, stderr)
 
-            while rl_tasks:
+            while readline_tasks:
                 done, _ = await asyncio.wait(
-                    rl_tasks, return_when=asyncio.FIRST_COMPLETED
+                    readline_tasks, return_when=asyncio.FIRST_COMPLETED
                 )
 
                 for future in done:
-                    stream, sink = rl_tasks.pop(future)
+                    stream, sink = readline_tasks.pop(future)
                     line = future.result()
                     if line:
                         line = decode(line).rstrip()
                         assert proc.stdin is not None
                         sink(line, proc.stdin)
-                        setup_rl_task(stream, sink)
+                        setup_readline_task(stream, sink)
 
             await proc.wait()
             assert proc.returncode is not None, "proc.returncode is None"

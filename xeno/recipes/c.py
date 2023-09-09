@@ -10,7 +10,7 @@ Batteries-included tools and opinionated defaults for building C programs.
 """
 
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 from xeno.recipe import recipe
 from xeno.recipes.shell import sh
@@ -28,6 +28,7 @@ def compile(
     *sources: PathSpec | NestedIterable[PathSpec],
     obj=False,
     headers: Iterable[PathSpec] = [],
+    target: Optional[PathSpec] = None,
     env=ENV,
 ):
     src, *srcs = expand(*sources)
@@ -39,4 +40,7 @@ def compile(
         cmd = "{CC} {CFLAGS} {src} {srcs} {LDFLAGS} -o {target}"
         suffix = ""
 
-    return sh(cmd, env=env, src=src, srcs=srcs, target=Path(src).with_suffix(suffix))
+    if target is None:
+        target = src
+
+    return sh(cmd, env=env, src=src, srcs=srcs, target=Path(target).with_suffix(suffix))

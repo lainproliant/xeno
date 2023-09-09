@@ -1253,18 +1253,23 @@ class XenoBatteriesIncludedTests(unittest.TestCase):
         from xeno.recipes.c import compile
 
         engine = Engine()
+        engine.add_hook(DefaultEngineHook())
 
         @engine.task(default=True)
         def hello():
-            return sh(compile("testsrc/void/void.c"), result=sh.result.STDOUT)
+            return sh(
+                compile("testsrc/void/void.c", target="the-void"),
+                result=sh.result.STDOUT,
+            )
 
-        result = engine.build()
+        result = engine.build('-D')
         self.assertEqual([], result[0])
 
     def test_hello_c(self):
         from xeno.recipes.c import compile
 
         engine = Engine()
+        engine.add_hook(DefaultEngineHook())
 
         @engine.task(default=True)
         def hello():

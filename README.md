@@ -1,14 +1,22 @@
-# Xeno: The Python dependency injector from outer space. 
+# `xeno`: The Python dependency injector from outer space. 
 [![Build Status](https://travis-ci.org/lainproliant/xeno.svg?branch=master)](https://travis-ci.org/lainproliant/xeno)
 
-Xeno is a simple Python dependency injection framework. Use it when you
-need to manage complex inter-object dependencies in a clean way. For the
+`xeno` at its core is a simple Python dependency injection framework. Use it when
+you need to manage complex inter-object dependencies in a clean way. For the
 merits of dependency injection and IOC, see
 https://en.wikipedia.org/wiki/Dependency_injection.
 
-Xeno should feel pretty familiar to users of Google Guice in Java, as it
+`xeno` should feel pretty familiar to users of Google Guice in Java, as it
 is somewhat similar, although it is less focused on type names and more
 on named resources and parameter injection.
+
+`xeno` also offers `xeno.build`, a build automation framework built atop the core
+dependency injection inspired by [Invoke](https://www.pyinvoke.org/).  It is
+intended to come with batteries-included tools for making C/C++ projects,
+executing shell scripts, batching, and more.  It is built on the concept of
+composable "recipes", which are generic instructions for building different
+types of filesystem targets.
+
 
 # Installation
 
@@ -25,8 +33,116 @@ $ sudo pip install xeno
 ```
 
 # Usage
+## As a build automation framework
 
-To use Xeno as a dependency injection framework, you need to create a
+To use `xeno.build` to build a simple C software project, first create a file
+called `build.py` in your repo (it can be called anything, but this is
+customary).  Follow this template example for guidance:
+
+```
+#!/usr/bin/env python3
+from xeno.build import *
+
+# TODO: Add recipes, providers, and tasks here.
+
+build()
+```
+
+Then, you can import the `compile` recipe from `xeno.recipes.c`:
+
+```
+from xeno.recipes.c import compile, ENV
+```
+
+`ENV` here is the default environment variables that `compile` will use by
+default.  It defaults to using `clang` to compile C projects, you can change
+that here, and you can add additional compile-time flags.  The `ENV` object is
+of type `xeno.shell.Environment`, which allows for some complex shlex-based
+joining and recombining of flags, such that you can additively compose the
+enviornment with defaults and/or what may be specified outside the build script.
+You can also provide your own environment variables via the `env=` parameter to
+`compile`.
+
+```
+ENV['CC'] = 'gcc'
+ENV += dict(
+    LDFLAGS='-g'
+)
+```
+
+Let's create a provider that lists all of our source files and another that
+lists our headers.  This will be useful for defining our tasks and using the
+`compile` recipe.
+
+```
+from pathlib import Path
+
+@provide
+def source_files():
+    return Path.cwd().glob("src/*.c")
+
+@provide
+def header_files():
+    return Path.cwd().glob("include/*.h")
+```
+
+Next, let's define a single default task that builds our program.
+
+```
+@task(default=True)
+def executable(source_files, header_files):
+    return compile(source_files, target="my_program", headers=header_files)
+```
+
+`compile` can take iterables of source files and/or combinations of strings and
+lists in `*args`.  In this case, we elected to specify a target name for the
+program.  If this wasn't the case, the name of the resulting target would be
+based on the name of the first source file.  This is ideal if there is only one
+source being provided or if the main source file is always provided first and is
+the desired name of the executable, but in this case it would be whatever came
+first in the directory order which isn't deterministic or ideal.
+
+Specifying the `headers=` parameter here links the recipe to our header files
+as static file dependencies.  If these files change, the recipe is acknowledged
+to be `outdated`, and will be rebuilt the next time the build script is run even
+if an executable target already exists.
+
+That's it!  Let's put it all together, and then we'll have a build script for
+our program.
+
+```
+#!/usr/bin/env python3
+from xeno.build import *
+from xeno.recipes.c import compile, ENV
+from pathlib import Path
+
+ENV['CC'] = 'gcc'
+ENV += dict(
+    LDFLAGS='-g'
+)
+
+@provide
+def source_files():
+    return Path.cwd().glob("src/*.c")
+
+@provide
+def header_files():
+    return Path.cwd().glob("include/*.h")
+
+build()
+```
+
+Mark this script as executable and run it as `./build.py`, or use `python
+build.py`.  Be sure to check out `./build.py --help` for a list of command line
+options and running modes.  `xeno.build` is smart and can create addressable
+targets from a variety of different nested recipe construction scenarios, so
+build more complex scripts and try out `./build.py -L` to see them all!
+
+Watch this space for more in-depth documentation to come in the near future.
+
+## As an IOC framework
+
+To use `xeno` as a dependency injection framework, you need to create a
 xeno.Injector and provide it with modules. These modules are regular
 Python objects with methods marked with the `@xeno.provider`
 annotation. This annotation tells the `Injector` that this method
@@ -51,7 +167,7 @@ existing object instances via `Injector.inject(obj)`. If the parameter
 is an object instance, it is scanned for methods marked with `@inject`
 and these methods are invoked with named resources provided.
 
-## Example
+### Example
 
 In this simple example, we inject an output stream into an object.
 
@@ -80,6 +196,15 @@ writer.write_version()
 Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
+
+### Version 7.0.0: Sep 09 2023
+- Lift various build recipes from different projects into a
+  "batteries-included" set of build tools under `xeno.recipes.**`.
+- New enriched focus on backwards compatibility between minor versons.
+- Restructuring and refactoring, `xeno.cookbook` is deprecated.
+- From now on, legacy features will be marked as deprecated and made to
+  continue to work until the next major version, during which they
+  will be removed.
 
 ### Version 4.12.0: Aug 07 2022
 - Changes to support Python 3.10, older versions are now deprecated.
@@ -120,7 +245,7 @@ Checkout `test.py` in the git repo for more usage examples.
 ### Version 4.0.0: May 12 2019
 ***BACKWARDS INCOMPATIBLE CHANGE***
 - Removed support for parameter annotation aliases.  Use `@alias` on methods instead.
-  This was removed to allow Xeno code to play nicely with PEP 484 type hinting.
+  This was removed to allow `xeno` code to play nicely with PEP 484 type hinting.
 
 ### Version 3.1.0: August 29 2018
 - Add ClassAttributes.for_object convenience method

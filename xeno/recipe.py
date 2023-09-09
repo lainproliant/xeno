@@ -7,6 +7,7 @@
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
 
+import os
 import asyncio
 import inspect
 import sys
@@ -121,7 +122,7 @@ class Recipe:
 
         def sigil(self, recipe: "Recipe") -> str:
             if recipe.has_target():
-                return f"{recipe.name}{Recipe.SIGIL_DELIMITER}{recipe.rtarget()}"
+                return f"{recipe.name}{Recipe.SIGIL_DELIMITER}{recipe.rel_target()}"
             return recipe.name
 
         def start(self, recipe: "Recipe") -> str:
@@ -683,16 +684,24 @@ class Recipe:
         except ValueError:
             return other
 
-    def rtarget(self):
+    def rel_target(self):
         try:
             return self.target.relative_to(Path.cwd())
         except ValueError:
             return self.target
 
-    def rtarget_or(self, other):
+    def rel_target_or(self, other):
         if self._target is None:
             return other
-        return self.rtarget()
+        return self.rel_target()
+
+    def exe_target(self) -> str:
+        rel_target = self.rel_target()
+        if not rel_target.is_absolute() and not rel_target.parent:
+            target = Path.cwd() / rel_target
+            if target.is_file() and os.access(target, os.X_OK):
+                return f"./{str(self.rel_target)}"
+        return str(rel_target)
 
     def target_or(self, other):
         if self._target is None:
