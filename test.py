@@ -3,11 +3,12 @@ import os
 import random
 import shutil
 import sys
+import tempfile
 import time
 import tracemalloc
+import types
 import unittest
 import uuid
-import types
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -40,7 +41,6 @@ from xeno.recipe import BuildError, Recipe
 from xeno.testing import OutputCapture
 
 tracemalloc.start()
-Recipe.UNICODE_SUPPORT = False
 
 
 # --------------------------------------------------------------------
@@ -1017,7 +1017,7 @@ class XenoBuildTests(unittest.TestCase):
         self.assertEqual(result, [0])
 
     def test_shell_recipe_and_async_timing(self):
-        from xeno.build import provide, recipe, task, engine
+        from xeno.build import engine, provide, recipe, task
         from xeno.cookbook import sh
 
         sh.env = dict(CAT="cat")
@@ -1235,6 +1235,43 @@ class XenoTestingUtilsTests(unittest.TestCase):
             self.assertEqual(capture.stdout.getvalue(), "Hello!\n")
 
         self.assertIs(sys.stdout, original_stdout)
+
+
+# --------------------------------------------------------------------
+class XenoBatteriesIncludedTests(unittest.TestCase):
+    def setUp(self):
+        self.prefix = Path(tempfile.mkdtemp())
+        shutil.copytree("./testsrc", self.prefix / "testsrc")
+        self.prev_cwd = os.getcwd()
+        os.chdir(self.prefix)
+
+    def tearDown(self):
+        shutil.rmtree(self.prefix)
+        os.chdir(self.prev_cwd)
+
+    def test_void(self):
+        from xeno.recipes.c import compile
+
+        engine = Engine()
+
+        @engine.task(default=True)
+        def hello():
+            return sh(compile("testsrc/void/void.c"), result=sh.result.STDOUT)
+
+        result = engine.build()
+        self.assertEqual([], result[0])
+
+    def test_hello_c(self):
+        from xeno.recipes.c import compile
+
+        engine = Engine()
+
+        @engine.task(default=True)
+        def hello():
+            return sh(compile("testsrc/hello/c/hello.c"), result=sh.result.STDOUT)
+
+        result = engine.build()
+        self.assertEqual(["Hello, world!"], result[0])
 
 
 # --------------------------------------------------------------------

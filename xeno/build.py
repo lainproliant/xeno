@@ -491,9 +491,7 @@ class Engine:
         return self._list_tasks(config, await self.tasks())
 
     async def _build_mode_list_all(self, config: Config):
-        return self._list_tasks(
-            config, (await self.addressable_task_map()).values()
-        )
+        return self._list_tasks(config, (await self.addressable_task_map()).values())
 
     async def _build_mode_query(self, config: Config):
         assert config.query is not None

@@ -46,6 +46,8 @@ class Environment(dict[str, str]):
                     filtered_env += {name: defaults[name]}
             elif name in defaults:
                 filtered_env[name] = defaults[name]
+            else:
+                filtered_env[name] = ""
         return filtered_env
 
     def split(self, key: str, default: Optional[Sequence[str]] = None):
@@ -59,7 +61,7 @@ class Environment(dict[str, str]):
             value = shlex.join([str(s) for s in value])
         super().__setitem__(key, str(value))
 
-    def __add__(self, rhs: dict[str, str]) -> "Environment":
+    def __add__(self, rhs: dict[str, str | Iterable[str]]) -> "Environment":
         new_env = Environment()
         for key, rhs_value in rhs.items():
             if key in self:
@@ -67,6 +69,8 @@ class Environment(dict[str, str]):
                 if isinstance(rhs, Environment):
                     rhs_value = rhs.split(key)
                     new_env[key] = lhs_value + rhs_value
+                elif is_iterable(rhs_value):
+                    new_env[key] = lhs_value + [str(s) for s in rhs_value]
                 else:
                     new_env[key] = lhs_value + shlex.split(rhs_value)
             else:

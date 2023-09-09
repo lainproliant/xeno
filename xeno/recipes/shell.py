@@ -7,10 +7,11 @@
 import shlex
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Optional, Union, cast
+from typing import Iterable, Optional, cast
 
 from xeno.recipe import Events, Recipe, recipe
 from xeno.shell import Environment, PathSpec, Shell
+from xeno.utils import is_iterable
 
 
 # --------------------------------------------------------------------
@@ -42,7 +43,7 @@ class ShellRecipe(Recipe):
 
     def __init__(
         self,
-        cmd: Union[str, Iterable[str]],
+        cmd,
         *,
         as_user: Optional[str] = None,
         code=0,
@@ -57,20 +58,37 @@ class ShellRecipe(Recipe):
         sync=False,
         **kwargs,
     ):
-        self.env = (
-            Environment.context() if env is None else {**Environment.context(), **env}
-        )
+        self.env = Environment.context() if env is None else {**env}
         self.shell = Shell(self.env, cwd)
+        self.cmd: str | list[str] = []
 
         target = None
+        component_list = []
 
         if Recipe.DEFAULT_TARGET_PARAM in kwargs:
             target = kwargs[Recipe.DEFAULT_TARGET_PARAM]
 
         self.as_user = as_user
-        self.cmd: list[str] | str = (
-            str(cmd) if isinstance(cmd, str | Path) else list(cmd)
-        )
+
+        def convert_cmd(cmd_comp):
+            if isinstance(cmd_comp, str | Path):
+                return str(cmd_comp)
+
+            elif isinstance(cmd_comp, Recipe):
+                assert (
+                    cmd_comp.has_target()
+                ), "Recipe without a target can't be used in a shell command."
+                component_list.append(cmd_comp)
+                return str(cmd_comp.target)
+
+            else:
+                raise ValueError(f"Invalid shell command component: {cmd_comp}")
+
+        if is_iterable(cmd):
+            self.cmd = [convert_cmd(c) for c in cmd]
+        else:
+            self.cmd = convert_cmd(cmd)
+
         self.expected_code = code
         self.interact = interact
         self.quiet = quiet
@@ -78,7 +96,7 @@ class ShellRecipe(Recipe):
         self.result_spec = result
         self.scanner = Recipe.scan([], kwargs)
         super().__init__(
-            [],
+            component_list,
             self.scanner.component_map(),
             memoize=memoize,
             name=name,
@@ -108,10 +126,12 @@ class ShellRecipe(Recipe):
     def log_stdout(self, line: str, _):
         if not self.quiet:
             self.log(Events.INFO, line)
+        self.stdout_lines.append(line)
 
     def log_stderr(self, line: str, _):
         if not self.quiet:
             self.log(Events.WARNING, line)
+        self.stderr_lines.append(line)
 
     async def make(self):
         self.return_code = None
@@ -143,30 +163,33 @@ class ShellRecipe(Recipe):
         else:
             self.return_code = self.shell.interact(self.cmd, **kwargs)
 
-    def _compute_one_result(self, spec: Result):
+    def _get_result(self, spec: Result):
         match spec:
             case ShellRecipe.Result.CODE:
                 return self.return_code
             case ShellRecipe.Result.FILE:
                 return self.target
             case ShellRecipe.Result.STDOUT:
-                return self.stdout_lines
+                result = self.stdout_lines
+                self.stdout_lines = []
+                return result
             case ShellRecipe.Result.STDERR:
-                return self.stderr_lines
+                result = self.stderr_lines
+                self.stderr_lines = []
+                return result
 
     def _compute_result(self):
         if self.result_spec is None:
-            if self.has_target():
-                result = ShellRecipe.Result.FILE
-            else:
-                result = ShellRecipe.Result.CODE
-
-            return self._compute_one_result(result)
+            return self._get_result(
+                ShellRecipe.Result.FILE
+                if self.has_target()
+                else ShellRecipe.Result.CODE
+            )
 
         if isinstance(self.result_spec, ShellRecipe.Result):
-            return self._compute_one_result(self.result_spec)
+            return self._get_result(self.result_spec)
 
-        return [self._compute_one_result(r) for r in self.result_spec]
+        return [self._get_result(r) for r in self.result_spec]
 
 
 # --------------------------------------------------------------------

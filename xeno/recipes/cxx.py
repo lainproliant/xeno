@@ -12,7 +12,9 @@ from xeno.shell import select_env
 from xeno.typedefs import PathSpec
 
 # --------------------------------------------------------------------
-ENV = select_env(append="CFLAGS", CC="clang++", CFLAGS=("-Wall", "--std=c++2a"))
+ENV = select_env(
+    "LDFLAGS", append="CFLAGS", CC="clang++", CFLAGS=("-Wall", "--std=c++2a")
+)
 
 
 # --------------------------------------------------------------------

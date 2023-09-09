@@ -9,31 +9,34 @@
 Batteries-included tools and opinionated defaults for building C programs.
 """
 
+from pathlib import Path
 from typing import Iterable
 
 from xeno.recipe import recipe
 from xeno.recipes.shell import sh
 from xeno.shell import select_env
-from xeno.typedefs import PathSpec
-
+from xeno.typedefs import PathSpec, NestedIterable
+from xeno.utils import expand
 
 # --------------------------------------------------------------------
-ENV = select_env(append="CFLAGS", CC="clang", CFLAGS=("-Wall", "--std=c17"))
+ENV = select_env("LDFLAGS", append="CFLAGS", CC="clang", CFLAGS=("-Wall", "--std=c17"))
 
 
 # -------------------------------------------------------------------
 @recipe(factory=True, sigil=lambda r: f"{r.name}:{r.target.name}")
 def compile(
-    *sources: PathSpec,
+    *sources: PathSpec | NestedIterable[PathSpec],
     obj=False,
     headers: Iterable[PathSpec] = [],
     env=ENV,
 ):
-    src, *srcs = sources
+    src, *srcs = expand(*sources)
 
     if obj:
-        cmd = "{CC} {CFLAGS} {src} {srcs} {LDFLAGS} -o {target}"
-        return sh(cmd, env=env, src=src, srcs=srcs, target=src.with_suffix(""))
-    else:
         cmd = "{CC} {CFLAGS} -c {src} {srcs} {LDFLAGS} -o {target}"
-        return sh(cmd, env=env, src=src, srcs=srcs, target=src.with_suffix(".o"))
+        suffix = ".o"
+    else:
+        cmd = "{CC} {CFLAGS} {src} {srcs} {LDFLAGS} -o {target}"
+        suffix = ""
+
+    return sh(cmd, env=env, src=src, srcs=srcs, target=Path(src).with_suffix(suffix))

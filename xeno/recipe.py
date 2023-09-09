@@ -177,9 +177,9 @@ class Recipe:
 
             if is_iterable(arg):
                 arg = [*arg]
-                if all(isinstance(x, Recipe) for x in arg):
+                if arg and all(isinstance(x, Recipe) for x in arg):
                     return arg, Recipe.ParamType.RECIPE
-                if all(isinstance(x, Path) for x in arg):
+                if arg and all(isinstance(x, Path) for x in arg):
                     return arg, Recipe.ParamType.PATH
 
             if isinstance(arg, Path):
