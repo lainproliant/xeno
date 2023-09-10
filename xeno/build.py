@@ -484,8 +484,7 @@ class Engine:
         self.txt(parser.format_help(), render="dim")
         self.txt("")
         self.txt("# Target Tasks")
-        await self._list_tasks(config, tasks)
-        await self._build_mode_list(config)
+        self._list_tasks(config, tasks)
 
     async def _build_mode_list(self, config: Config):
         return self._list_tasks(config, await self.tasks())
