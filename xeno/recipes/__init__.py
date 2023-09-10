@@ -21,7 +21,7 @@ TEST_ENV = select_env()
 
 
 # -------------------------------------------------------------------
-@recipe(factory=True)
+@recipe(factory=True, sigil=lambda r: f"{r.name}:{r.target.name}")
 def install(program: Recipe, env=INSTALL_ENV):
     root = env.get("DESTDIR", "/")
     prefix = env.get("PREFIX", "/usr/local")
