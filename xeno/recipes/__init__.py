@@ -57,7 +57,7 @@ def repo_deps(repo):
 
 
 # -------------------------------------------------------------------
-@recipe(factory=True, sigil=lambda r: f"{r.name}:{r.arg('repo').split('/')[-1]}")
+@recipe(factory=True, sigil=lambda r: f"{r.name}:{r.arg('repo').target.name.split('/')[-1]}")
 def checkout(repo):
     name = repo.split("/")[-1]
     return repo_deps(
