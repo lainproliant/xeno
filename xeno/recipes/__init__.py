@@ -48,3 +48,18 @@ def test(t, env=TEST_ENV, interactive: Collection[str] = set()):
         interactive=t.name in interactive,
     )
     return result
+
+
+# -------------------------------------------------------------------
+@recipe(factory=True)
+def repo_deps(repo):
+    return sh("[[ ! -f build.py ]] || ./build.py deps", repo=repo, cwd=repo.target)
+
+
+# -------------------------------------------------------------------
+@recipe(factory=True, sigil=lambda r: f"{r.name}:{r.arg('repo').split('/')[-1]}")
+def checkout(repo):
+    name = repo.split("/")[-1]
+    return repo_deps(
+        sh("git clone {repo} {target}", repo=repo, target=Path("deps") / name)
+    )
