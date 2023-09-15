@@ -197,6 +197,9 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 7.2.1: Sep 15 2023
+- Allow recipe factories to return empty results as None (or no explicit return value).
+
 ### Version 7.2.0: Sep 15 2023
 - Improvements to the busy spinner: it now loops through pending recipe sigils
   to let the user know what is blocking in the build.

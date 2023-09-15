@@ -915,6 +915,8 @@ def recipe(
                         sync=sync,
                         cleanup_files=cleanup_paths,
                     )
+                elif result is None:
+                    result = Recipe([], docs=docs, name=truename)
                 else:
                     result = cast(Recipe, result)
 
