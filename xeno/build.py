@@ -15,6 +15,7 @@ import traceback
 from argparse import ArgumentParser, HelpFormatter
 from collections import defaultdict
 from typing import Any, Callable, Iterable, Optional, cast
+from datetime import datetime, timedelta
 
 from xeno.async_injector import AsyncInjector
 from xeno.attributes import MethodAttributes
@@ -543,6 +544,9 @@ class DefaultEngineHook:
         self.txt: Optional[TextDecorator] = None
         self.quiet = False
         self.to_stdout = False
+        self.active_offset = -1
+        self.active_inc_dt = datetime.min
+        self.print_len = 0
 
     def embrace(self, *content, **kwargs):
         assert self.txt
@@ -561,8 +565,27 @@ class DefaultEngineHook:
         if self.quiet:
             return
         assert self.txt
-        self.spinner.message = f"resolving [{len(Recipe.active)}]"
-        self.txt.wipe = await self.spinner.spin()
+
+        now = datetime.now()
+        sorted_active = sorted(Recipe.active, key=lambda r: r.sigil())
+
+        if now > self.active_inc_dt:
+            self.active_offset += 1
+            self.active_inc_dt = now + timedelta(seconds=1)
+
+        if self.active_offset >= len(sorted_active):
+            self.active_offset = 0
+
+        if sorted_active:
+            recipe = sorted_active[self.active_offset]
+            message = f"resolving {len(Recipe.active)} [{recipe.sigil()}]"
+        else:
+            message = ""
+
+        if message != self.spinner.message:
+            self.txt.wipeline(self.print_len)
+            self.spinner.message = message
+        self.txt.wipe = self.print_len = await self.spinner.spin()
 
     def on_clean(self, event):
         if self.quiet:

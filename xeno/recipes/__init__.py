@@ -8,12 +8,15 @@
 # Distributed under terms of the MIT license.
 # -------------------------------------------------------------------
 
-from pathlib import Path
-from typing import Collection
-from xeno.recipe import Recipe, recipe
-from xeno.shell import select_env
-from xeno.recipes.shell import sh
+import ast
 
+from pathlib import Path
+from typing import Collection, Optional
+
+from xeno.recipe import Recipe, recipe
+from xeno.recipes.shell import sh
+from xeno.shell import select_env
+from xeno.typedefs import PathSpec
 
 # -------------------------------------------------------------------
 INSTALL_ENV = select_env(append="PREFIX,DESTDIR", PREFIX="usr/local", DESTDIR="/")
@@ -51,15 +54,39 @@ def test(t, env=TEST_ENV, interactive: Collection[str] = set()):
 
 
 # -------------------------------------------------------------------
-@recipe(factory=True)
-def repo_deps(repo):
-    return sh("[[ ! -f build.py ]] || ./build.py deps", repo=repo, cwd=repo.target)
+@recipe
+async def repo_deps(repo):
+    build_script = Path(repo) / 'build.py'
+    if not build_script.exists():
+        return 0
+
+    with open(build_script, "r") as infile:
+        tree = ast.parse(infile.read())
+
+    def has_xeno_imports():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith('xeno'):
+                        return True
+            elif isinstance(node, ast.ImportFrom):
+                if node.module and node.module.startswith('xeno'):
+                    return True
+        return False
+
+    if has_xeno_imports():
+        return await sh('./build.py deps', repo=repo, cwd=repo, check=True).make()
+
+    return 0
 
 
 # -------------------------------------------------------------------
-@recipe(factory=True, sigil=lambda r: f"{r.name}:{r.arg('repo').target.name.split('/')[-1]}")
-def checkout(repo):
+@recipe(
+    factory=True, sigil=lambda r: f"{r.name}:{r.arg('repo').target.name.split('/')[-1]}"
+)
+def checkout(repo, target: Optional[PathSpec] = None):
     name = repo.split("/")[-1]
+    target = target or Path("deps") / name
     return repo_deps(
-        sh("git clone {repo} {target}", repo=repo, target=Path("deps") / name)
+        sh(["git", "clone", "{repo}", "{target}"], repo=repo, target=target)
     )

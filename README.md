@@ -197,6 +197,13 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 7.2.0: Sep 15 2023
+- Improvements to the busy spinner: it now loops through pending recipe sigils
+  to let the user know what is blocking in the build.
+- Improved xeno.recipes.checkout() now opens `build.py` and checks its Python AST
+  for references to "xeno" before trying to run "./build.py deps" if "build.py"
+  is present in the resulting repository.
+
 ### Version 7.1.0: Sep 09 2023
 - Add a `update()` override to `xeno.shell.Environment` which takes
   the same arguments as `select()` but updates the dictionary in-place
