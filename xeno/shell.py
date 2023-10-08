@@ -117,12 +117,12 @@ def digest_params(params: EnvDict):
 
 
 # --------------------------------------------------------------------
-def check(cmd: Union[str, Iterable[str]]):
+def check(cmd: Union[str, Iterable[str]], **kwargs):
     if isinstance(cmd, str):
         args = shlex.split(cmd)
     else:
         args = [*cmd]
-    return subprocess.check_output(args).decode("utf-8").strip()
+    return subprocess.check_output(args, **kwargs).decode("utf-8").strip()
 
 
 # --------------------------------------------------------------------

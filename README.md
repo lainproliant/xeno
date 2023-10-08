@@ -197,6 +197,9 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 7.2.2: Oct 7 2023
+- Add a `**kwargs` pass-thru for `xeno.shell.check()` for passing args to `subprocess.check_output()`.
+
 ### Version 7.2.1: Sep 15 2023
 - Allow recipe factories to return empty results as None (or no explicit return value).
 
