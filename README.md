@@ -197,6 +197,11 @@ Checkout `test.py` in the git repo for more usage examples.
 
 ## Change Log
 
+### Version 7.3.0: Oct 9 2023
+- `xeno.build` targets can now receive arguments!  All args after a lone '@' arg are packed into an
+  implicit `argv` resource that can be injected into targets automatically.
+- Fixed broken `run_as` functionality in `ShellRecipe`.
+
 ### Version 7.2.2: Oct 7 2023
 - Add a `**kwargs` pass-thru for `xeno.shell.check()` for passing args to `subprocess.check_output()`.
 

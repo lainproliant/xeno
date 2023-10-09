@@ -8,13 +8,14 @@
 # --------------------------------------------------------------------
 
 import asyncio
+import itertools
 import os
 import shlex
-import subprocess
 import shutil
-import itertools
+import signal
+import subprocess
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple, Union, Sequence
+from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Set, Tuple, Union
 
 from xeno.utils import decode, is_iterable
 
@@ -85,7 +86,6 @@ class Environment(dict[str, str]):
         new_dict = self + rhs
         super().update(new_dict)
         return self
-
 
 
 # --------------------------------------------------------------------
@@ -177,10 +177,28 @@ class Shell:
             shell=True,
         )
 
-    def _interact(self, cmd: str, check: bool) -> int:
-        returncode = subprocess.call(cmd, env=self._env, cwd=self._cwd, shell=True)
-        assert not check or returncode == 0, "Command failed."
-        return returncode
+    def _interact(self, cmd: str, check: bool, ctrlc: bool) -> int:
+        existing_handler = signal.getsignal(signal.SIGINT)
+        ctrlc_happened = [False]
+
+        def ctrlc_handler(*_):
+            print()
+            print("Received Ctrl+C.")
+            ctrlc_happened[0] = True
+
+        try:
+            if ctrlc:
+                signal.signal(signal.SIGINT, ctrlc_handler)
+
+            returncode = subprocess.call(cmd, env=self._env, cwd=self._cwd, shell=True)
+            if ctrlc_happened[0]:
+                return 0
+            assert not check or returncode == 0, "Command failed."
+            return returncode
+
+        finally:
+            if ctrlc:
+                signal.signal(signal.SIGINT, existing_handler)
 
     def interpolate(
         self,
@@ -267,16 +285,23 @@ class Shell:
     ) -> int:
         return asyncio.run(self.run(cmd, stdin, stdout, stderr, check, **params))
 
-    def interact(self, cmd: Union[str, Iterable[str]], check=False, **params) -> int:
+    def interact(
+        self, cmd: Union[str, Iterable[str]], check=False, ctrlc=False, **params
+    ) -> int:
         cmd = self.interpolate(cmd, params)
-        return self._interact(cmd, check)
+        return self._interact(cmd, check, ctrlc)
 
     def interact_as(
-        self, as_user: str, cmd: Union[str, Iterable[str]], check=False, **params
+        self,
+        as_user: str,
+        cmd: Union[str, Iterable[str]],
+        check=False,
+        ctrlc=False,
+        **params,
     ) -> int:
         cmd = self.interpolate(cmd, params)
         cmd = shlex.join(["sudo", "-u", as_user, "sh", "-c", cmd])
-        return self._interact(cmd, check)
+        return self._interact(cmd, check, ctrlc)
 
 
 # --------------------------------------------------------------------

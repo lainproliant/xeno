@@ -12,7 +12,7 @@ import fnmatch
 import multiprocessing
 import sys
 import traceback
-from argparse import ArgumentParser, HelpFormatter
+from argparse import ArgumentParser, HelpFormatter, REMAINDER
 from collections import defaultdict
 from typing import Any, Callable, Iterable, Optional, cast
 from datetime import datetime, timedelta
@@ -367,7 +367,11 @@ class Engine:
         task_names: set[str] = set()
         tasks = []
         for target in targets:
-            for name in fnmatch.filter(task_map.keys(), target):
+            results = fnmatch.filter(task_map.keys(), target)
+            if len(results) < 1:
+                raise ValueError(f"Target filter `{target}` matched no defined targets.")
+
+            for name in results:
                 if name not in task_names:
                     task_names.add(name)
                     tasks.append(task_map[name])
@@ -512,8 +516,21 @@ class Engine:
         result, _ = await asyncio.gather(self.build_async(config), bus.run())
         return result
 
-    def build(self, *argv, raise_errors=False):
-        config = Config().parse_args(*argv)
+    def build(self, *argv_, raise_errors=False):
+        target_argv = [*argv_]
+        build_argv = []
+
+        while target_argv:
+            arg = target_argv.pop(0)
+            if arg == "@":
+                break
+            build_argv.append(arg)
+
+        config = Config().parse_args(*build_argv)
+
+        @self.provide
+        def argv():
+            return target_argv
 
         match config.color:
             case Config.ColorOptions.YES:

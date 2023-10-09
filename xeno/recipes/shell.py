@@ -47,6 +47,7 @@ class ShellRecipe(Recipe):
         *,
         as_user: Optional[str] = None,
         code=0,
+        ctrlc=False,
         cwd: Optional[PathSpec] = None,
         env: Optional[Environment] = None,
         interact=False,
@@ -67,8 +68,6 @@ class ShellRecipe(Recipe):
 
         if Recipe.DEFAULT_TARGET_PARAM in kwargs:
             target = kwargs[Recipe.DEFAULT_TARGET_PARAM]
-
-        self.as_user = as_user
 
         def convert_cmd(cmd_comp) -> str:
             if isinstance(cmd_comp, str | Path):
@@ -94,13 +93,15 @@ class ShellRecipe(Recipe):
 
         self.expected_code = code
         self.interact = interact
+        self.ctrlc = ctrlc
         self.quiet = quiet
         self.redacted = redacted
         self.result_spec = result
         self.scanner = Recipe.scan([], kwargs)
         super().__init__(
-            component_list,
-            self.scanner.component_map(),
+            component_list=component_list,
+            component_map=self.scanner.component_map(),
+            as_user=as_user,
             memoize=memoize,
             name=name,
             fmt=ShellRecipe.Format(),
@@ -162,9 +163,11 @@ class ShellRecipe(Recipe):
     def _make_interactive(self):
         kwargs = self.scanner.kwargs(Recipe.PassMode.RESULTS)
         if self.as_user:
-            self.return_code = self.shell.interact_as(self.as_user, self.cmd, **kwargs)
+            self.return_code = self.shell.interact_as(
+                self.as_user, self.cmd, ctrlc=self.ctrlc, **kwargs
+            )
         else:
-            self.return_code = self.shell.interact(self.cmd, **kwargs)
+            self.return_code = self.shell.interact(self.cmd, ctrlc=self.ctrlc, **kwargs)
 
     def _get_result(self, spec: Result):
         match spec:
