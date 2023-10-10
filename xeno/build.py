@@ -12,7 +12,7 @@ import fnmatch
 import multiprocessing
 import sys
 import traceback
-from argparse import ArgumentParser, HelpFormatter, REMAINDER
+from argparse import ArgumentParser, HelpFormatter
 from collections import defaultdict
 from typing import Any, Callable, Iterable, Optional, cast
 from datetime import datetime, timedelta

@@ -183,7 +183,6 @@ class Shell:
 
         def ctrlc_handler(*_):
             print()
-            print("Received Ctrl+C.")
             ctrlc_happened[0] = True
 
         try:
