@@ -39,6 +39,7 @@ from xeno.cookbook import sh
 from xeno.pkg_config import PackageConfig
 from xeno.recipe import BuildError, Recipe
 from xeno.testing import OutputCapture
+from xeno.shell import Shell
 
 tracemalloc.start()
 
@@ -955,20 +956,34 @@ class XenoEnvironmentTests(unittest.TestCase):
         from xeno.shell import Environment
 
         env = Environment(CC="clang", CFLAGS="-I./include", LDFLAGS="-g")
-        print(f'before {env=}')
+        print(f"before {env=}")
         env.update(
             append="CFLAGS,LDFLAGS",
             CC="gcc",
             CFLAGS="-I./deps/include",
             LDFLAGS="-lpthread",
         )
-        print(f'after {env=}')
+        print(f"after {env=}")
         self.assertEqual(
             Environment(
                 CC="gcc", CFLAGS="-I./include -I./deps/include", LDFLAGS="-g -lpthread"
             ),
-            env
+            env,
         )
+
+
+# --------------------------------------------------------------------
+class XenoShellTests(unittest.TestCase):
+    def test_env_variables(self):
+        sh = Shell({"TEST_VAL": 666})
+        output = []
+
+        def output_sink(s, _):
+            output.append(s)
+
+        sh.sync("bash ./testsrc/sh/echo.sh", stdout=output_sink, check=True)
+        self.assertEqual(1, len(output))
+        self.assertEqual("666", output[0])
 
 
 # --------------------------------------------------------------------

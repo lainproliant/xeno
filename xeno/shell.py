@@ -14,6 +14,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import multiprocessing
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Set, Tuple, Union
 
@@ -227,6 +228,51 @@ class Shell:
 
         return final_cmd
 
+    async def _run(
+        self,
+        cmd: Union[str, Iterable[str]],
+        stdin: Optional[InputSource] = None,
+        stdout: Optional[LineSink] = None,
+        stderr: Optional[LineSink] = None,
+        check=False,
+        **params,
+    ) -> int:
+        readline_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
+
+        def setup_readline_task(stream: asyncio.StreamReader, sink: LineSink):
+            readline_tasks[asyncio.Task(stream.readline())] = (stream, sink)
+
+        cmd = self.interpolate(cmd, params)
+        proc = await self._create_proc(cmd)
+        assert proc.stdout is not None
+        assert proc.stderr is not None
+        if stdin:
+            assert proc.stdin
+            proc.stdin.write(stdin().encode("utf-8"))
+        if stdout:
+            setup_readline_task(proc.stdout, stdout)
+        if stderr:
+            setup_readline_task(proc.stderr, stderr)
+
+        while readline_tasks:
+            done, _ = await asyncio.wait(
+                readline_tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+
+            for future in done:
+                stream, sink = readline_tasks.pop(future)
+                line = future.result()
+                if line:
+                    line = decode(line).rstrip()
+                    assert proc.stdin is not None
+                    sink(line, proc.stdin)
+                    setup_readline_task(stream, sink)
+
+        await proc.wait()
+        assert proc.returncode is not None, "proc.returncode is None"
+        assert not check or proc.returncode == 0, "Command failed."
+        return proc.returncode
+
     async def run(
         self,
         cmd: Union[str, Iterable[str]],
@@ -236,42 +282,11 @@ class Shell:
         check=False,
         **params,
     ) -> int:
-        async with self.job_semaphore:
-            readline_tasks: Dict[asyncio.Future[Any], OutputTaskData] = {}
-
-            def setup_readline_task(stream: asyncio.StreamReader, sink: LineSink):
-                readline_tasks[asyncio.Task(stream.readline())] = (stream, sink)
-
-            cmd = self.interpolate(cmd, params)
-            proc = await self._create_proc(cmd)
-            assert proc.stdout is not None
-            assert proc.stderr is not None
-            if stdin:
-                assert proc.stdin
-                proc.stdin.write(stdin().encode("utf-8"))
-            if stdout:
-                setup_readline_task(proc.stdout, stdout)
-            if stderr:
-                setup_readline_task(proc.stderr, stderr)
-
-            while readline_tasks:
-                done, _ = await asyncio.wait(
-                    readline_tasks, return_when=asyncio.FIRST_COMPLETED
-                )
-
-                for future in done:
-                    stream, sink = readline_tasks.pop(future)
-                    line = future.result()
-                    if line:
-                        line = decode(line).rstrip()
-                        assert proc.stdin is not None
-                        sink(line, proc.stdin)
-                        setup_readline_task(stream, sink)
-
-            await proc.wait()
-            assert proc.returncode is not None, "proc.returncode is None"
-            assert not check or proc.returncode == 0, "Command failed."
-            return proc.returncode
+        if self.max_jobs < 1:
+            return await self._run(cmd, stdin, stdout, stderr, check, **params)
+        else:
+            async with self.job_semaphore:
+                return await self._run(cmd, stdin, stdout, stderr, check, **params)
 
     def sync(
         self,
