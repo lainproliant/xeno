@@ -44,8 +44,6 @@ class Environment(dict[str, str]):
                 filtered_env[name] = self[name]
                 if name in append_set and name in defaults:
                     filtered_env += {name: defaults[name]}
-                else:
-                    filtered_env[name] = defaults[name]
             elif name in defaults:
                 filtered_env[name] = defaults[name]
             else:

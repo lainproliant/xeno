@@ -19,7 +19,9 @@ from xeno.typedefs import PathSpec, NestedIterable
 from xeno.utils import expand
 
 # --------------------------------------------------------------------
-ENV = select_env("LDFLAGS", append="CFLAGS", CC="clang", CFLAGS=("-Wall", "--std=c17"))
+ENV = select_env(
+    "PATH", "LDFLAGS", append="CFLAGS", CC="clang", CFLAGS=("-Wall", "--std=c17")
+)
 
 
 # -------------------------------------------------------------------
