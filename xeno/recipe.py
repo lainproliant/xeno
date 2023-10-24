@@ -500,6 +500,13 @@ class Recipe:
         except StopIteration:
             return False
 
+    def has_dependencies(self):
+        try:
+            next(self.dependencies())
+            return True
+        except StopIteration:
+            return False
+
     def components(self) -> Generator["Recipe", None, None]:
         yield from self.component_list
         for c in self.component_map.values():
@@ -547,7 +554,7 @@ class Recipe:
             yield from self.parent.dependencies()
 
     def dependencies_age(self, ref: datetime) -> timedelta:
-        if not self.has_components():
+        if not self.has_dependencies():
             return timedelta.max
         else:
             return min(
