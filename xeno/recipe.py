@@ -621,7 +621,7 @@ class Recipe:
             recipes.extend(self._deps)
             results = await asyncio.gather(
                 *[c.clean() for c in recipes],
-                *[c.clean_components(recursive=True) for c in recipes],
+                *[c.clean_components(recursive=True) for c in recipes if not c.keep],
             )
         else:
             results = await asyncio.gather(

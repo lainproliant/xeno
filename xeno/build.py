@@ -50,7 +50,6 @@ class Config:
         NONE = "none"
         SHALLOW = "shallow"
         RECURSIVE = "recursive"
-        RECURSIVE_WITH_DEPS = "recursive_with_deps"
 
     class ColorOptions:
         YES = "yes"
@@ -100,14 +99,6 @@ class Config:
             action="store_const",
             const=self.CleanupMode.RECURSIVE,
             help="Clean the specified or default targets and all their components.",
-        )
-        parser.add_argument(
-            "--full-clean",
-            "-C",
-            dest="cleanup_mode",
-            action="store_const",
-            const=self.CleanupMode.RECURSIVE_WITH_DEPS,
-            help="Clean the specified or default targets and all their components and dependencies.",
         )
         parser.add_argument(
             "--cut",
@@ -469,11 +460,6 @@ class Engine:
             case Config.CleanupMode.SHALLOW:
                 return await asyncio.gather(*[task.clean() for task in tasks])
             case Config.CleanupMode.RECURSIVE:
-                return await asyncio.gather(
-                    *[task.clean() for task in tasks],
-                    *[task.clean_components(recursive=True) for task in tasks],
-                )
-            case Config.CleanupMode.RECURSIVE_WITH_DEPS:
                 return await asyncio.gather(
                     *[task.clean() for task in tasks],
                     *[task.clean_components(recursive=True) for task in tasks],
