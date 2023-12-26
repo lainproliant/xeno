@@ -46,6 +46,8 @@ class ShellRecipe(Recipe):
         cmd,
         *,
         as_user: Optional[str] = None,
+        cleanup: Optional[str | list[str]] = None,
+        cleanup_cwd: Optional[PathSpec] = None,
         code=0,
         ctrlc=False,
         cwd: Optional[PathSpec] = None,
@@ -62,6 +64,14 @@ class ShellRecipe(Recipe):
         self.env = Environment.context() if env is None else {**env}
         self.shell = Shell(self.env, cwd)
         self.cmd: str | list[str] = []
+        self.cleanup_cmd = cleanup
+        self.cleanup_cwd = Path(cleanup_cwd or Path.cwd())
+
+        if cwd:
+            # Add 'cwd' to kwargs if specified, as kwargs is used
+            # by the scanner to interpolate keyword args into
+            # commands.
+            kwargs["cwd"] = cwd
 
         target = None
         component_list = []
@@ -137,6 +147,14 @@ class ShellRecipe(Recipe):
             self.log(Events.WARNING, line)
         self.stderr_lines.append(line)
 
+    async def clean(self):
+        await super().clean()
+
+        if self.cleanup_cmd:
+            self._make_interactive(True)
+            if self.return_code != 0:
+                raise RuntimeError("Failed to run cleanup command.")
+
     async def make(self):
         self.return_code = None
         self.stdout_lines.clear()
@@ -160,14 +178,26 @@ class ShellRecipe(Recipe):
 
         return self._compute_result()
 
-    def _make_interactive(self):
-        kwargs = self.scanner.kwargs(Recipe.PassMode.RESULTS)
+    def _make_interactive(self, cleanup=False):
+        shell = self.shell
+
+        if cleanup:
+            cmd = self.cleanup_cmd
+            shell = shell.cd(self.cleanup_cwd)
+            pass_mode = Recipe.PassMode.TARGETS
+        else:
+            cmd = self.cmd
+            pass_mode = Recipe.PassMode.RESULTS
+
+        assert cmd
+
+        kwargs = self.scanner.kwargs(pass_mode)
         if self.as_user:
-            self.return_code = self.shell.interact_as(
-                self.as_user, self.cmd, ctrlc=self.ctrlc, **kwargs
+            self.return_code = shell.interact_as(
+                self.as_user, cmd, ctrlc=self.ctrlc, **kwargs
             )
         else:
-            self.return_code = self.shell.interact(self.cmd, ctrlc=self.ctrlc, **kwargs)
+            self.return_code = shell.interact(cmd, ctrlc=self.ctrlc, **kwargs)
 
     def _get_result(self, spec: Result):
         match spec:

@@ -548,10 +548,19 @@ class Recipe:
         for component in self.components():
             component.add_dependency(dep)
 
-    def dependencies(self) -> Generator["Recipe", None, None]:
-        yield from self._deps
+    def dependencies(
+        self, visited_in: Optional[set["Recipe"]] = None
+    ) -> Iterable["Recipe"]:
+        visited = visited_in or set()
+
+        for dep in self._deps:
+            if dep not in visited:
+                yield dep
+                visited.add(dep)
+                yield from dep.dependencies(visited)
+
         if self.has_parent():
-            yield from self.parent.dependencies()
+            yield from self.parent.dependencies(visited)
 
     def dependencies_age(self, ref: datetime) -> timedelta:
         if not self.has_dependencies():
@@ -618,7 +627,7 @@ class Recipe:
         recipes = [*self.components()]
 
         if recursive:
-            recipes.extend(self._deps)
+            recipes.extend(self.dependencies())
             results = await asyncio.gather(
                 *[c.clean() for c in recipes],
                 *[c.clean_components(recursive=True) for c in recipes if not c.keep],

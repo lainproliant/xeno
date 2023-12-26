@@ -14,7 +14,6 @@ import shlex
 import shutil
 import signal
 import subprocess
-import multiprocessing
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Set, Tuple, Union
 
@@ -32,27 +31,37 @@ class Environment(dict[str, str]):
     def context(cls):
         return cls(os.environ)
 
-    def select(
-        self, *names: str, append: Optional[Sequence[str] | str] = None, **defaults: Any
-    ) -> "Environment":
+    def select(self, *names: str, **defaults: Any) -> "Environment":
         filtered_env = Environment()
-        if isinstance(append, str):
-            append = append.split(",")
-        append_set = set(append or [])
         for name in itertools.chain(names, defaults.keys()):
             if name in self:
                 filtered_env[name] = self[name]
-                if name in append_set and name in defaults:
-                    filtered_env += {name: defaults[name]}
             elif name in defaults:
                 filtered_env[name] = defaults[name]
             else:
                 filtered_env[name] = ""
         return filtered_env
 
-    def update(self, *args, **kwargs):
-        new_dict = self.select(*args, **kwargs)
-        super().update(new_dict)
+    def append(self, *args, **kwargs) -> "Environment":
+        env = Environment()
+        env.update(self)
+
+        for arg in args:
+            if hasattr(arg, "keys"):
+                env = env.append(**arg)
+            else:
+                for k, v in arg:
+                    env = env.append(**{k: v})
+
+        for k, v in kwargs.items():
+            if is_iterable(v):
+                v = [str(x) for x in v]
+            else:
+                v = shlex.split(str(v))
+            if k in env:
+                v = shlex.split(env[k]) + v
+            env[k] = shlex.join(v)
+        return env
 
     def split(self, key: str, default: Optional[Sequence[str]] = None):
         if key in self:

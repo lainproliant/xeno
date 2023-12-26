@@ -15,13 +15,11 @@ from typing import Iterable, Optional
 from xeno.recipe import recipe
 from xeno.recipes.shell import sh
 from xeno.shell import select_env
-from xeno.typedefs import PathSpec, NestedIterable
+from xeno.typedefs import NestedIterable, PathSpec
 from xeno.utils import expand
 
 # --------------------------------------------------------------------
-ENV = select_env(
-    "PATH", "LDFLAGS", append="CFLAGS", CC="clang", CFLAGS=("-Wall", "--std=c17")
-)
+ENV = select_env("PATH", "LDFLAGS", CC="clang").append(CFLAGS=("-Wall", "--std=c17"))
 
 
 # -------------------------------------------------------------------
