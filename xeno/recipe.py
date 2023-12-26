@@ -7,9 +7,9 @@
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
 
-import os
 import asyncio
 import inspect
+import os
 import sys
 import uuid
 from dataclasses import dataclass
@@ -635,6 +635,9 @@ class Recipe:
 
     async def make_dependencies(self):
         recipes = [*self.dependencies()]
+        for dep in self.dependencies():
+            recipes.extend(dep.dependencies())
+
         if self.sync:
             for c in recipes:
                 try:

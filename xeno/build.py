@@ -14,8 +14,8 @@ import sys
 import traceback
 from argparse import ArgumentParser, HelpFormatter
 from collections import defaultdict
-from typing import Any, Callable, Iterable, Optional, cast
 from datetime import datetime, timedelta
+from typing import Any, Callable, Iterable, Optional, cast
 
 from xeno.async_injector import AsyncInjector
 from xeno.attributes import MethodAttributes
@@ -360,7 +360,9 @@ class Engine:
         for target in targets:
             results = fnmatch.filter(task_map.keys(), target)
             if len(results) < 1:
-                raise ValueError(f"Target filter `{target}` matched no defined targets.")
+                raise ValueError(
+                    f"Target filter `{target}` matched no defined targets."
+                )
 
             for name in results:
                 if name not in task_names:
@@ -517,6 +519,10 @@ class Engine:
         @self.provide
         def argv():
             return target_argv
+
+        @self.provide
+        def build_config():
+            return config
 
         match config.color:
             case Config.ColorOptions.YES:
