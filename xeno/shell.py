@@ -42,26 +42,39 @@ class Environment(dict[str, str]):
                 filtered_env[name] = ""
         return filtered_env
 
-    def append(self, *args, **kwargs) -> "Environment":
-        env = Environment()
-        env.update(self)
-
+    def update(self, *args, **kwargs):
         for arg in args:
             if hasattr(arg, "keys"):
-                env = env.append(**arg)
+                self.update(**arg)
             else:
                 for k, v in arg:
-                    env = env.append(**{k: v})
+                    self.update(**{k: v})
+
+        for k, v in kwargs.items():
+            if is_iterable(v):
+                self[k] = shlex.join([str(x) for x in v])
+            else:
+                self[k] = str(v)
+
+        return self
+
+    def append(self, *args, **kwargs):
+        for arg in args:
+            if hasattr(arg, "keys"):
+                self.append(**arg)
+            else:
+                for k, v in arg:
+                    self.append(**{k: v})
 
         for k, v in kwargs.items():
             if is_iterable(v):
                 v = [str(x) for x in v]
             else:
                 v = shlex.split(str(v))
-            if k in env:
-                v = shlex.split(env[k]) + v
-            env[k] = shlex.join(v)
-        return env
+            if k in self:
+                v = shlex.split(self[k]) + v
+            self[k] = shlex.join(v)
+        return self
 
     def split(self, key: str, default: Optional[Sequence[str]] = None):
         if key in self:

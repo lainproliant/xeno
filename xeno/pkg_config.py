@@ -7,7 +7,15 @@
 # Distributed under terms of the MIT license.
 # --------------------------------------------------------------------
 
-from xeno.shell import check, Environment
+from xeno.shell import Environment, check
+
+
+# --------------------------------------------------------------------
+def pkg_config(names: list[str], static=False) -> Environment:
+    env = Environment()
+    for name in names:
+        env.append(PackageConfig(name))
+    return env
 
 
 # --------------------------------------------------------------------
