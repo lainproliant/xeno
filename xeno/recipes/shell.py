@@ -50,7 +50,7 @@ class ShellRecipe(Recipe):
         cleanup_cwd: Optional[PathSpec] = None,
         code=0,
         ctrlc=False,
-        cwd: Optional[PathSpec] = None,
+        cwd: Optional[PathSpec | Recipe] = None,
         env: Optional[Environment] = None,
         interact=False,
         memoize=False,
@@ -61,8 +61,12 @@ class ShellRecipe(Recipe):
         sync=False,
         **kwargs,
     ):
+        shell_cwd = cwd
+        if isinstance(cwd, Recipe):
+            shell_cwd = cwd.target
+
         self.env = Environment.context() if env is None else {**env}
-        self.shell = Shell(self.env, cwd)
+        self.shell = Shell(self.env, shell_cwd)
         self.cmd: str | list[str] = []
         self.cleanup_cmd = cleanup
         self.cleanup_cwd = Path(cleanup_cwd or Path.cwd())
@@ -70,7 +74,7 @@ class ShellRecipe(Recipe):
         if cwd:
             # Add 'cwd' to kwargs if specified, as kwargs is used
             # by the scanner to interpolate keyword args into
-            # commands.
+            # commands and determine dependencies.
             kwargs["cwd"] = cwd
 
         target = None

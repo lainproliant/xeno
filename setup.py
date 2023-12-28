@@ -11,7 +11,7 @@ with open(path.join(here, "README.md"), encoding="utf-8") as f:
 
 setup(
     name="xeno",
-    version="7.4.1",
+    version="7.4.2",
     description="The Python IOC app and build framework from outer space.",
     long_description=long_description,
     long_description_content_type="text/markdown",
