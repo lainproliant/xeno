@@ -5,7 +5,7 @@
 # Date: Tuesday August 29, 2023
 # --------------------------------------------------------------------
 
-from typing import Iterable
+from typing import Iterable, Optional
 
 from xeno.recipes.c import compile as base_compile
 from xeno.shell import select_env
@@ -22,6 +22,7 @@ def compile(
     *sources: PathSpec,
     obj=False,
     headers: Iterable[PathSpec] = [],
+    target: Optional[PathSpec] = None,
     env=ENV,
 ):
-    return base_compile(*sources, obj=obj, headers=headers, env=env)
+    return base_compile(*sources, obj=obj, headers=headers, target=target, env=env)

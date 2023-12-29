@@ -1,7 +1,7 @@
 from codecs import open
 from os import path
 
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 here = path.abspath(path.dirname(__file__))
 
@@ -11,7 +11,7 @@ with open(path.join(here, "README.md"), encoding="utf-8") as f:
 
 setup(
     name="xeno",
-    version="7.4.2",
+    version="7.4.3",
     description="The Python IOC app and build framework from outer space.",
     long_description=long_description,
     long_description_content_type="text/markdown",
