@@ -31,6 +31,9 @@ class Environment(dict[str, str]):
     def context(cls):
         return cls(os.environ)
 
+    def copy(self) -> "Environment":
+        return Environment().update(self)
+
     def select(self, *names: str, **defaults: Any) -> "Environment":
         filtered_env = Environment()
         for name in itertools.chain(names, defaults.keys()):

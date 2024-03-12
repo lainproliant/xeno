@@ -38,8 +38,8 @@ from xeno.build import DefaultEngineHook, Engine
 from xeno.cookbook import sh
 from xeno.pkg_config import PackageConfig
 from xeno.recipe import BuildError, Recipe
-from xeno.testing import OutputCapture
 from xeno.shell import Shell
+from xeno.testing import OutputCapture
 
 tracemalloc.start()
 
@@ -957,12 +957,8 @@ class XenoEnvironmentTests(unittest.TestCase):
 
         env = Environment(CC="clang", CFLAGS="-I./include", LDFLAGS="-g")
         print(f"before {env=}")
-        env.update(
-            append="CFLAGS,LDFLAGS",
-            CC="gcc",
-            CFLAGS="-I./deps/include",
-            LDFLAGS="-lpthread",
-        )
+        env.update(CC="gcc")
+        env.append(CFLAGS="-I./deps/include", LDFLAGS="-lpthread")
         print(f"after {env=}")
         self.assertEqual(
             Environment(

@@ -11,10 +11,12 @@ from xeno.shell import Environment, check
 
 
 # --------------------------------------------------------------------
-def pkg_config(names: list[str], static=False) -> Environment:
+def pkg_config(names: str | list[str], static=False) -> Environment:
     env = Environment()
+    if isinstance(names, str):
+        names = [names]
     for name in names:
-        env.append(PackageConfig(name))
+        env.append(PackageConfig(name, static=static))
     return env
 
 
