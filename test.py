@@ -1268,7 +1268,7 @@ class XenoTestingUtilsTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------
-class XenoBatteriesIncludedTests(unittest.TestCase):
+class XenoRecipeTests(unittest.TestCase):
     def setUp(self):
         self.prefix = Path(tempfile.mkdtemp())
         shutil.copytree("./testsrc", self.prefix / "testsrc")
@@ -1307,6 +1307,35 @@ class XenoBatteriesIncludedTests(unittest.TestCase):
 
         result = engine.build()
         self.assertEqual(["Hello, world!"], result[0])
+
+    def test_multisrc_link(self):
+        from xeno.recipes.c import compile
+
+        engine = Engine()
+        engine.add_hook(DefaultEngineHook())
+
+        @engine.provide
+        def path():
+            return Path("testsrc/multisrc")
+
+        @engine.provide
+        def sources(path):
+            return path.glob("*.c")
+
+        @engine.task
+        def objects(sources):
+            return [compile(src, obj=True) for src in sources]
+
+        @engine.task
+        def executable(objects, path):
+            return compile(objects, target=path / "hello_mew_mew")
+
+        @engine.task(default=True)
+        def hello_mew_mew(executable):
+            return sh(executable, result=sh.result.STDOUT)
+
+        result = engine.build()
+        self.assertEqual(["Hello mew mew!"], result[0])
 
 
 # --------------------------------------------------------------------

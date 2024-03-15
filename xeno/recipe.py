@@ -154,8 +154,8 @@ class Recipe:
 
     class ParamType(Enum):
         NORMAL = 0
-        RECIPE = 1
-        PATH = 2
+        PATH = 1
+        RECIPE = 2
 
     class Scanner:
         def __init__(self):
@@ -262,6 +262,22 @@ class Recipe:
 
             return param_type
 
+        def _resolve_result(self, value):
+            if is_iterable(value):
+                return [self._resolve_result(r) for r in value]
+            elif value.poly:
+                return [self._resolve_result(c) for c in value.components()]
+            else:
+                return value.result()
+
+        def _resolve_target(self, value):
+            if is_iterable(value):
+                return [self._resolve_target(r) for r in value]
+            elif value.poly:
+                return [self._resolve_target(c) for c in value.components()]
+            else:
+                return value.target_or(value)
+
         def args(self, pass_mode: "Recipe.PassMode") -> list[Any]:
             match pass_mode:
                 case Recipe.PassMode.NORMAL:
@@ -270,19 +286,13 @@ class Recipe:
                     results = [*self._args]
                     for offset in self._arg_offsets:
                         value = results[offset]
-                        if is_iterable(value):
-                            results[offset] = [r.result() for r in value]
-                        else:
-                            results[offset] = value.result()
+                        results[offset] = self._resolve_result(value)
                     return results
                 case Recipe.PassMode.TARGETS:
                     results = [*self._args]
                     for offset in self._arg_offsets:
                         value = results[offset]
-                        if is_iterable(value):
-                            results[offset] = [r.target_or(r) for r in value]
-                        else:
-                            results[offset] = value.target_or(value)
+                        results[offset] = self._resolve_target(value)
                     return results
 
         def kwargs(self, pass_mode: "Recipe.PassMode") -> dict[str, Any]:
@@ -293,19 +303,13 @@ class Recipe:
                     results = {**self._kwargs}
                     for key in self._kwarg_keys:
                         value = results[key]
-                        if is_iterable(value):
-                            results[key] = [r.result() for r in value]
-                        else:
-                            results[key] = value.result()
+                        results[key] = self._resolve_result(value)
                     return results
                 case Recipe.PassMode.TARGETS:
                     results = {**self._kwargs}
                     for key in self._kwarg_keys:
                         value = results[key]
-                        if is_iterable(value):
-                            results[key] = [r.target_or(r) for r in value]
-                        else:
-                            results[key] = value.target_or(value)
+                        results[key] = self._resolve_target(value)
                     return results
 
         def paths(self):
@@ -368,6 +372,23 @@ class Recipe:
                 yield recipe
             yield from cls.flat(recipe.children, visited)
 
+    @classmethod
+    def expand(cls, obj):
+        """
+        Expand a nested array structure that may contain recipes.
+        If any recipes are poly, they are expanded into their components.
+        """
+        if is_iterable(obj):
+            for v in obj:
+                yield from Recipe.expand(v)
+        elif isinstance(obj, Recipe):
+            if obj.poly:
+                yield from Recipe.expand(obj.components())
+            else:
+                yield obj
+        else:
+            yield obj
+
     def __init__(
         self,
         component_list: ComponentIterable = [],
@@ -381,6 +402,7 @@ class Recipe:
         memoize=False,
         name="(nameless)",
         parent: Optional["Recipe"] = None,
+        poly=False,
         setup: Optional["Recipe"] = None,
         sigil: Optional[FormatF] = None,
         static_files: Iterable[PathSpec] = [],
@@ -404,6 +426,7 @@ class Recipe:
         self.keep = keep
         self.memoize = memoize
         self.name = name
+        self.poly = poly
         self.setup = setup
         self.static_files = [
             Path(s) for s in static_files if target is None or Path(s) != Path(target)
@@ -931,6 +954,7 @@ def recipe(
                         keep=keep,
                         memoize=memoize,
                         name=truename,
+                        poly=True,
                         sync=sync,
                         cleanup_files=cleanup_paths,
                     )
@@ -978,3 +1002,7 @@ def recipe(
         return no_type_check(wrapper(name_or_f))
 
     return no_type_check(cast(Callable[[Callable], Callable], wrapper))
+
+
+# --------------------------------------------------------------------
+expand = Recipe.expand

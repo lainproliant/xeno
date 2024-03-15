@@ -12,7 +12,7 @@ import inspect
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Generator, Iterable, Union, TypeVar
+from typing import Any, Generator, Iterable, TypeVar
 
 from xeno.errors import InjectionError
 from xeno.typedefs import NestedIterable

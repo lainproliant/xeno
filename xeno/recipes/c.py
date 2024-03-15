@@ -12,11 +12,10 @@ Batteries-included tools and opinionated defaults for building C programs.
 from pathlib import Path
 from typing import Iterable, Optional
 
-from xeno.recipe import recipe
+from xeno.recipe import expand, recipe
 from xeno.recipes.shell import sh
 from xeno.shell import select_env
-from xeno.typedefs import NestedIterable, PathSpec
-from xeno.utils import expand
+from xeno.typedefs import PathSpec
 
 # --------------------------------------------------------------------
 ENV = select_env("PATH", "CC", "CFLAGS", "LDFLAGS", CC="clang").append(
@@ -27,7 +26,7 @@ ENV = select_env("PATH", "CC", "CFLAGS", "LDFLAGS", CC="clang").append(
 # -------------------------------------------------------------------
 @recipe(factory=True, sigil=lambda r: f"{r.name}:{r.target.name}")
 def compile(
-    *sources: PathSpec | NestedIterable[PathSpec],
+    *sources,
     obj=False,
     headers: Iterable[PathSpec] = [],
     target: Optional[PathSpec] = None,
