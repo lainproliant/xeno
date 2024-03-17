@@ -31,15 +31,18 @@ def compile(
     headers: Iterable[PathSpec] = [],
     target: Optional[PathSpec] = None,
     env=ENV,
+    compiler_var="CC",
 ):
     src, *srcs = expand(*sources)
 
     if obj:
-        cmd = "{CC} {CFLAGS} -c {src} {srcs} {LDFLAGS} -o {target}"
+        cmd = "{COMPILER} {CFLAGS} -c {src} {srcs} {LDFLAGS} -o {target}"
         suffix = ".o"
     else:
-        cmd = "{CC} {CFLAGS} {src} {srcs} {LDFLAGS} -o {target}"
+        cmd = "{COMPILER} {CFLAGS} {src} {srcs} {LDFLAGS} -o {target}"
         suffix = ""
+
+    cmd.replace("{COMPILER}", f"{{{compiler_var}}}")
 
     if target is None:
         target = src
