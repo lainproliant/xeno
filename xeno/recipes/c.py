@@ -42,7 +42,7 @@ def compile(
         cmd = "{COMPILER} {CFLAGS} {src} {srcs} {LDFLAGS} -o {target}"
         suffix = ""
 
-    cmd.replace("{COMPILER}", f"{{{compiler_var}}}")
+    cmd = cmd.replace("{COMPILER}", f"{{{compiler_var}}}")
 
     if target is None:
         target = src
