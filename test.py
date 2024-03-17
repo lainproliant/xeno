@@ -35,9 +35,9 @@ from xeno import (
     using,
 )
 from xeno.build import DefaultEngineHook, Engine
-from xeno.cookbook import sh
 from xeno.pkg_config import PackageConfig
 from xeno.recipe import BuildError, Recipe
+from xeno.recipes import sh
 from xeno.shell import Shell
 from xeno.testing import OutputCapture
 
@@ -1048,7 +1048,7 @@ class XenoBuildTests(unittest.TestCase):
 
     def test_shell_recipe_and_async_timing(self):
         from xeno.build import engine, provide, recipe, task
-        from xeno.cookbook import sh
+        from xeno.recipes import sh
 
         sh.env = dict(CAT="cat")
 

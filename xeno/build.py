@@ -23,7 +23,7 @@ from xeno.color import TextDecorator
 from xeno.color import disable as disable_color
 from xeno.color import enable as enable_color
 from xeno.color import is_enabled as is_color_enabled
-from xeno.cookbook import recipe as base_recipe
+from xeno.recipe import recipe as base_recipe
 from xeno.decorators import named
 from xeno.events import Event, EventBus
 from xeno.recipe import BuildError, Events, Recipe
