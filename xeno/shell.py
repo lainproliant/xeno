@@ -141,12 +141,17 @@ def digest_params(params: EnvDict):
 
 
 # --------------------------------------------------------------------
-def check(cmd: Union[str, Iterable[str]], **kwargs):
+def check(cmd: Union[str, Iterable[str]], **kwargs) -> str:
     if isinstance(cmd, str):
         args = shlex.split(cmd)
     else:
         args = [*cmd]
     return subprocess.check_output(args, **kwargs).decode("utf-8").strip()
+
+
+# --------------------------------------------------------------------
+def check_flags(cmd: str | Iterable[str], **kwargs) -> list[str]:
+    return shlex.split(check(cmd, **kwargs))
 
 
 # --------------------------------------------------------------------
@@ -231,9 +236,11 @@ class Shell:
         redacted: Set[str] = set(),
     ) -> str:
         digested_params = {
-            k: wrappers[k](v)
-            if k in wrappers
-            else (wrappers["*"](v) if "*" in wrappers else v)
+            k: (
+                wrappers[k](v)
+                if k in wrappers
+                else (wrappers["*"](v) if "*" in wrappers else v)
+            )
             for k, v in digest_params(params).items()
         }
 
