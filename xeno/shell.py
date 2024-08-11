@@ -279,6 +279,7 @@ class Shell:
         if stdin:
             assert proc.stdin
             proc.stdin.write(stdin().encode("utf-8"))
+            proc.stdin.close()
         if stdout:
             setup_readline_task(proc.stdout, stdout)
         if stderr:
