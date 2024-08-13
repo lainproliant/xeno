@@ -56,11 +56,6 @@ def test(t, env=TEST_ENV, interactive: Collection[str] = set()):
 @recipe(target=lambda kw: kw["repo"].target)
 async def repo_deps(repo):
     build_script = Path(repo) / "build.py"
-    if not build_script.exists():
-        return 0
-
-    with open(build_script, "r") as infile:
-        tree = ast.parse(infile.read())
 
     def has_xeno_imports():
         for node in ast.walk(tree):
@@ -73,10 +68,14 @@ async def repo_deps(repo):
                     return True
         return False
 
-    if has_xeno_imports():
-        return sh("./build.py deps", target=repo, cwd=repo, check=True)
+    if build_script.exists():
+        with open(build_script, "r") as infile:
+            tree = ast.parse(infile.read())
 
-    return 0
+        if has_xeno_imports():
+            return sh("./build.py deps", target=repo, cwd=repo, check=True)
+
+    return repo.target
 
 
 # -------------------------------------------------------------------
