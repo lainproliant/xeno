@@ -820,7 +820,7 @@ class Lambda(Recipe):
         lambda_kwargs: dict[str, Any],
         docs: Optional[str] = None,
         pass_mode=Recipe.PassMode.RESULTS,
-        target_param=Recipe.DEFAULT_TARGET_PARAM,
+        target_f: Callable[[dict[str, Any]], PathSpec] | None = None,
         **kwargs,
     ):
         if "name" not in kwargs:
@@ -829,7 +829,7 @@ class Lambda(Recipe):
         scanner = Recipe.scan(lambda_args, lambda_kwargs)
         sig = inspect.signature(f)
         self.bound_args = sig.bind(*lambda_args, **lambda_kwargs)
-        target = self.bound_args.arguments.get(target_param, None)
+        target = target_f(self.bound_args.arguments) if target_f else None
 
         super().__init__(
             scanner.component_list(),
@@ -887,6 +887,7 @@ def recipe(
     memoize=False,
     sigil: Optional[FormatF] = None,
     sync=False,
+    target: Callable[[dict[str, Any]], PathSpec] | None = None,
     cleanup: Optional[str | Iterable[str]] = None,
 ):
     """
@@ -946,6 +947,11 @@ def recipe(
                     **scanner.kwargs(Recipe.PassMode.NORMAL),
                 )
 
+                target_override: PathSpec | None = None
+
+                if target is not None:
+                    target_override = target(scanner.kwargs(Recipe.PassMode.NORMAL))
+
                 if is_iterable(result):
                     result = Recipe(
                         [*result],
@@ -971,6 +977,9 @@ def recipe(
                     result.sync = sync
                     result.cleanup_files = cleanup_paths
 
+                if target_override is not None:
+                    result._target = target_override
+
             else:
                 result = Lambda(
                     f,
@@ -983,6 +992,7 @@ def recipe(
                     name=truename,
                     sync=sync,
                     cleanup_files=cleanup_paths,
+                    target_f=target,
                 )
 
             if sigil:
@@ -993,7 +1003,6 @@ def recipe(
                 [] if dep is None else list_or_delim(dep),
                 scanner.bind(f, Recipe.PassMode.NORMAL),
             )
-
             return result
 
         return target_wrapper

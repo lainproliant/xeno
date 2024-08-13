@@ -9,7 +9,6 @@
 # -------------------------------------------------------------------
 
 import ast
-
 from pathlib import Path
 from typing import Collection, Optional
 
@@ -54,9 +53,9 @@ def test(t, env=TEST_ENV, interactive: Collection[str] = set()):
 
 
 # -------------------------------------------------------------------
-@recipe
+@recipe(target=lambda kw: kw["repo"].target)
 async def repo_deps(repo):
-    build_script = Path(repo) / 'build.py'
+    build_script = Path(repo) / "build.py"
     if not build_script.exists():
         return 0
 
@@ -67,23 +66,21 @@ async def repo_deps(repo):
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name.startswith('xeno'):
+                    if alias.name.startswith("xeno"):
                         return True
             elif isinstance(node, ast.ImportFrom):
-                if node.module and node.module.startswith('xeno'):
+                if node.module and node.module.startswith("xeno"):
                     return True
         return False
 
     if has_xeno_imports():
-        return await sh('./build.py deps', repo=repo, cwd=repo, check=True).make()
+        return sh("./build.py deps", target=repo, cwd=repo, check=True)
 
     return 0
 
 
 # -------------------------------------------------------------------
-@recipe(
-    factory=True, sigil=lambda r: f"{r.name}:{r.arg('repo').target.name.split('/')[-1]}"
-)
+@recipe(factory=True)
 def checkout(repo, target: Optional[PathSpec] = None):
     name = repo.split("/")[-1]
     target = target or Path("deps") / name
