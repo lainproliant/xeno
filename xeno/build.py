@@ -516,6 +516,9 @@ class Engine:
 
         config = Config().parse_args(*build_argv)
 
+        if config.debug:
+            Recipe.DEBUG = True
+
         @self.provide
         def argv():
             return target_argv

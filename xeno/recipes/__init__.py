@@ -75,7 +75,7 @@ async def repo_deps(repo):
         if has_xeno_imports():
             return sh("./build.py deps", target=repo, cwd=repo, check=True)
 
-    return repo.target
+    return repo.target if isinstance(repo, Recipe) else repo
 
 
 # -------------------------------------------------------------------

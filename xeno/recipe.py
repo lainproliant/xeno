@@ -12,6 +12,7 @@ import inspect
 import os
 import sys
 import uuid
+import traceback
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -85,6 +86,7 @@ FormatF = Callable[["Recipe"], str]
 class Recipe:
     DEFAULT_TARGET_PARAM = "target"
     SIGIL_DELIMITER = ":"
+    DEBUG = False
 
     active: set["Recipe"] = set()
 
@@ -805,6 +807,8 @@ class Recipe:
 
             except Exception as e:
                 self.log(Events.FAIL, e)
+                if Recipe.DEBUG:
+                    traceback.print_exc()
                 raise BuildError(self, str(e)) from e
 
             finally:
