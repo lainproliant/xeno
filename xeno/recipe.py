@@ -11,8 +11,8 @@ import asyncio
 import inspect
 import os
 import sys
-import uuid
 import traceback
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -824,7 +824,7 @@ class Lambda(Recipe):
         lambda_kwargs: dict[str, Any],
         docs: Optional[str] = None,
         pass_mode=Recipe.PassMode.RESULTS,
-        target_f: Callable[[dict[str, Any]], PathSpec] | None = None,
+        target_f: Callable[[Recipe], PathSpec] | None = None,
         **kwargs,
     ):
         if "name" not in kwargs:
@@ -833,7 +833,10 @@ class Lambda(Recipe):
         scanner = Recipe.scan(lambda_args, lambda_kwargs)
         sig = inspect.signature(f)
         self.bound_args = sig.bind(*lambda_args, **lambda_kwargs)
-        target = target_f(self.bound_args.arguments) if target_f else None
+        if target_f is None and self.arg(self.DEFAULT_TARGET_PARAM) is not None:
+            target = self.arg(self.DEFAULT_TARGET_PARAM)
+        else:
+            target = target_f(self) if target_f else None
 
         super().__init__(
             scanner.component_list(),
@@ -891,7 +894,7 @@ def recipe(
     memoize=False,
     sigil: Optional[FormatF] = None,
     sync=False,
-    target: Callable[[dict[str, Any]], PathSpec] | None = None,
+    target: Callable[[Any], PathSpec] | None = None,
     cleanup: Optional[str | Iterable[str]] = None,
 ):
     """

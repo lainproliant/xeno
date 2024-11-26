@@ -53,7 +53,7 @@ def test(t, env=TEST_ENV, interactive: Collection[str] = set()):
 
 
 # -------------------------------------------------------------------
-@recipe(target=lambda kw: kw["repo"].target)
+@recipe(target=lambda r: r.arg("repo").target)
 async def repo_deps(repo):
     path = Path(repo)
     build_script = Path(repo) / "build.py"
