@@ -1074,6 +1074,10 @@ class XenoBuildTests(unittest.TestCase):
             return slowly_make_number(99)
 
         @task
+        def shlex_args():
+            return sh("echo 'a b c d e f g'", result="args")
+
+        @task
         def print_file_2(file):
             return sh(["{CAT}", file], interact=True)
 
@@ -1090,6 +1094,9 @@ class XenoBuildTests(unittest.TestCase):
 
         result = engine.build("print_file_2", "slow_number")
         self.assertEqual(result, [0, 99])
+
+        result = engine.build("shlex_args")
+        self.assertEqual(result, [["a", "b", "c", "d", "e", "f", "g"]])
 
         start_time = datetime.now()
         result = engine.build("two_slow_numbers")

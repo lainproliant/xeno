@@ -5,7 +5,7 @@
 # Date: Sunday August 27, 2023
 # --------------------------------------------------------------------
 import shlex
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Iterable, Optional, cast
 
@@ -16,11 +16,12 @@ from xeno.utils import is_iterable
 
 # --------------------------------------------------------------------
 class ShellRecipe(Recipe):
-    class Result(Enum):
-        CODE = 0
-        STDOUT = 1
-        STDERR = 2
-        FILE = 3
+    class Result(StrEnum):
+        CODE = "code"
+        STDOUT = "stdout"
+        STDERR = "stderr"
+        FILE = "file"
+        ARGS = "args"
 
     ResultSpec = Iterable[Result] | Result
 
@@ -64,6 +65,7 @@ class ShellRecipe(Recipe):
         shell_cwd = cwd
         if isinstance(cwd, Recipe):
             shell_cwd = cwd.target
+        assert not isinstance(shell_cwd, Recipe)
 
         self.env = Environment.context() if env is None else {**env}
         self.shell = Shell(self.env, shell_cwd)
@@ -217,6 +219,12 @@ class ShellRecipe(Recipe):
                 result = self.stderr_lines
                 self.stderr_lines = []
                 return result
+            case ShellRecipe.Result.ARGS:
+                result = shlex.split("\n".join(self.stdout_lines))
+                self.stdout_lines = []
+                return result
+            case _:
+                return None
 
     def _compute_result(self):
         if self.result_spec is None:
@@ -226,7 +234,7 @@ class ShellRecipe(Recipe):
                 else ShellRecipe.Result.CODE
             )
 
-        if isinstance(self.result_spec, ShellRecipe.Result):
+        if isinstance(self.result_spec, (ShellRecipe.Result, str)):
             return self._get_result(self.result_spec)
 
         return [self._get_result(r) for r in self.result_spec]
