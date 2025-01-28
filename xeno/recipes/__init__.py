@@ -75,9 +75,15 @@ async def repo_deps(repo):
                     return True
         return False
 
-    if build_script.exists():
-        if has_xeno_imports():
-            await sh("./build.py deps", target=repo, cwd=repo, check=True).make()
+    def has_deps_target():
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name == "deps":
+                    return True
+        return False
+
+    if has_xeno_imports() and has_deps_target():
+        return await sh("./build.py deps", repo=repo, cwd=repo, check=True).make()
 
     return repo.target if isinstance(repo, Recipe) else repo
 
