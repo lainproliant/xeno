@@ -83,7 +83,7 @@ async def repo_deps(repo):
         return False
 
     if has_xeno_imports() and has_deps_target():
-        return await sh("./build.py deps", repo=repo, cwd=repo, check=True).make()
+        await sh("./build.py deps", repo=repo, cwd=repo, check=True).make()
 
     return repo.target if isinstance(repo, Recipe) else repo
 
