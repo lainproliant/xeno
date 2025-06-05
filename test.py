@@ -1344,6 +1344,23 @@ class XenoRecipeTests(unittest.TestCase):
         result = engine.build()
         self.assertEqual(["Hello mew mew!"], result[0])
 
+    def test_stdin_write(self):
+        from xeno.recipes import shell
+
+        engine = Engine()
+        engine.add_hook(DefaultEngineHook())
+        path = Path("testsrc/multisrc")
+
+        @engine.task(default=True)
+        def write_to_file():
+            return sh("cat > {target}", target=path / "file.txt", stdin="mew mew")
+
+        result = engine.build()
+
+        with open(path / "file.txt", "r") as infile:
+            value = infile.read()
+            self.assertEqual("mew mew", value)
+
 
 # --------------------------------------------------------------------
 if __name__ == "__main__":

@@ -60,6 +60,7 @@ class ShellRecipe(Recipe):
         result: Optional["ShellRecipe.ResultSpec"] = None,
         redacted: set[str] = set(),
         sync=False,
+        stdin: Optional[str] = None,
         **kwargs,
     ):
         shell_cwd = cwd
@@ -127,6 +128,7 @@ class ShellRecipe(Recipe):
         )
 
         self.name = self.name or self.program_name()
+        self.stdin = stdin
 
         self.return_code: Optional[int] = None
         self.stdout_lines: list[str] = []
@@ -171,8 +173,13 @@ class ShellRecipe(Recipe):
             self._make_interactive()
 
         else:
+            stdin = None
+            if self.stdin is not None:
+                stdin = lambda: self.stdin
+
             self.return_code = await self.shell.run(
                 self.cmd,
+                stdin=stdin,
                 stdout=self.log_stdout,
                 stderr=self.log_stderr,
                 **self.scanner.kwargs(Recipe.PassMode.RESULTS),
